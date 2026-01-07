@@ -26,6 +26,11 @@ import json
 import os
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
+import stripe
+
+stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+STRIPE_READER_ID = os.environ["STRIPE_READER_ID"]
+import time
 
 # Optional preview stack
 try:
@@ -34,7 +39,6 @@ try:
     HAS_PREVIEW = True
 except Exception:
     HAS_PREVIEW = False
-import os
 import glob
 import subprocess
 
@@ -160,7 +164,6 @@ class PhotoBoothUI:
         self.root.bind("<Escape>", lambda e: self.cleanup_and_exit())
         self.templates = []
         # ---- state ----
-        self.paid = False
         self.is_running_sequence = False
         self.photo_index = 1  # 1..3
         self.total_photos = 4
@@ -210,9 +213,66 @@ class PhotoBoothUI:
         # start preview loop
         self.update_camera_frame()
 
-    # -------------------------
-    # Screen builders (Canvas only)
-    # -------------------------
+    def charge_with_wisepos(self, amount_cents: int) -> bool:
+        """
+        Starts a card-present payment on the WisePOS and waits for completion.
+        Returns True only when the payment succeeds.
+        """
+        try:
+            # 1) Create the PaymentIntent (it will usually start as requires_payment_method — that's normal)
+            pi = stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency="usd",
+                payment_method_types=["card_present"],
+                description="Photobooth session"
+            )
+
+            # 2) Tell the reader to process it
+            stripe.terminal.Reader.process_payment_intent(
+                STRIPE_READER_ID,
+                payment_intent=pi.id
+            )
+
+            # 3) Wait for the READER action to finish (this is the reliable signal)
+            start = time.time()
+            while time.time() - start < 90:
+                reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
+                action = getattr(reader, "action", None)
+
+                # If no action yet, just keep waiting a moment
+                if not action:
+                    time.sleep(0.5)
+                    continue
+
+                status = getattr(action, "status", None)
+
+                # Action finished successfully → confirm PI status
+                if status == "succeeded":
+                    pi = stripe.PaymentIntent.retrieve(pi.id)
+                    return pi.status == "succeeded"
+
+                # Action ended unsuccessfully
+                if status in ("failed", "canceled"):
+                    return False
+
+                # Otherwise it's still in progress
+                time.sleep(0.5)
+
+            # 4) Timeout: cancel on reader to reset terminal state
+            try:
+                stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
+            except Exception:
+                pass
+            return False
+
+        except Exception as e:
+            try:
+                stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
+            except Exception:
+                pass
+            messagebox.showerror("Payment error", str(e))
+            return False
+
     def build_welcome_screen(self):
         self.welcome_frame = tk.Frame(self.container, bg="black")
         self.welcome_canvas = tk.Canvas(
@@ -224,6 +284,7 @@ class PhotoBoothUI:
         self.welcome_canvas.pack(expand=True, fill="both")
 
         # Optional: load a welcome background image (fills screen)
+        self.tk_welcome_bg = None
         if self.welcome_bg_path and HAS_PREVIEW:
             try:
                 img = Image.open(self.welcome_bg_path)
@@ -236,14 +297,6 @@ class PhotoBoothUI:
                 print(f"[WARN] Could not load welcome background: {e}")
                 self.tk_welcome_bg = None
 
-        if self.welcome_bg_path:
-            img = Image.open(self.welcome_bg_path)
-            img = img.resize(
-                (self.root.winfo_screenwidth(), self.root.winfo_screenheight()),
-                Image.LANCZOS
-            )
-            self.tk_welcome_bg = ImageTk.PhotoImage(img)
-
         self.welcome_bg_item = self.welcome_canvas.create_image(
             0, 0,
             anchor="nw",
@@ -251,7 +304,7 @@ class PhotoBoothUI:
         )
         self.welcome_canvas.tag_lower(self.welcome_bg_item)
 
-        # Title text (Canvas text = no background boxes)
+        # Title text
         self.welcome_text_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
             200,
@@ -265,58 +318,60 @@ class PhotoBoothUI:
         self.subtitle_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
             300,
-            text="Pay to start",
+            text="Tap to pay & start",
             fill="white",
             font=self.font_subtitle,
             anchor="center"
         )
 
-        # Buttons are real widgets, placed onto Canvas with create_window
-        self.pay_button = tk.Button(
-            self.welcome_frame,  # parent can be frame; Canvas will host it
-            text="Pay (demo)",
-            font=self.font_button,
-            width=18,
-            height=2,
-            command=self.simulate_payment,
-            bg="white",
-            fg="black",
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=0,
-            takefocus=False,
-            activebackground="#e6e6e6",
-        )
+        # --- Welcome tap-to-pay state ---
+        self.session_paid = False
+        self._payment_in_progress = False
+        self._welcome_tap_enabled = True
 
-        self.start_button = tk.Button(
-            self.welcome_frame,
-            text="Start",
-            font=self.font_button,
-            width=18,
-            height=2,
-            command=self.start_sequence,
-            bg="white",
-            fg="black",
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=0,
-            takefocus=False,
-            activebackground="#e6e6e6",
-        )
+        def _on_welcome_tap(event=None):
+            if self.session_paid or self._payment_in_progress:
+                return
 
-        # Place buttons (we'll hide/show Start by canvas item state)
-        cx = self.root.winfo_screenwidth() // 2
-        self.pay_button_win = self.welcome_canvas.create_window(
-            cx, 430,
-            window=self.pay_button,
-            anchor="center"
-        )
-        self.start_button_win = self.welcome_canvas.create_window(
-            cx, 560,
-            window=self.start_button,
-            anchor="center",
-            state="hidden"  # locked until paid
-        )
+            self._payment_in_progress = True
+            self.welcome_canvas.itemconfig(self.subtitle_item, text="Please pay on the terminal…")
+
+            def _run_payment():
+                ok = False
+                try:
+                    # Clear any stuck reader action (safe)
+                    try:
+                        stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
+                    except Exception:
+                        pass
+
+                    ok = self.charge_with_wisepos(amount_cents=50)
+                finally:
+                    def _finish():
+                        self._payment_in_progress = False
+                        if ok:
+                            self.session_paid = True
+                            self._welcome_tap_enabled = False
+                            self.welcome_canvas.itemconfig(self.subtitle_item, text="Paid ✅ Starting…")
+                            self.root.after(100, self.start_sequence)
+                        else:
+                            self.welcome_canvas.itemconfig(self.subtitle_item, text="Payment failed. Tap to try again.")
+
+                    self.root.after(0, _finish)
+
+            import threading
+            threading.Thread(target=_run_payment, daemon=True).start()
+
+        def _tap_wrapper(event=None):
+            if not self._welcome_tap_enabled:
+                return
+            _on_welcome_tap(event)
+
+        # Bind tap/click on the entire welcome screen
+        self.welcome_canvas.bind("<Button-1>", _tap_wrapper)
+        self.welcome_canvas.tag_bind(self.welcome_bg_item, "<Button-1>", _tap_wrapper)
+        self.welcome_canvas.tag_bind(self.welcome_text_item, "<Button-1>", _tap_wrapper)
+        self.welcome_canvas.tag_bind(self.subtitle_item, "<Button-1>", _tap_wrapper)
 
     def build_capture_screen(self):
         self.capture_frame = tk.Frame(self.container, bg="black")
@@ -373,44 +428,180 @@ class PhotoBoothUI:
     # Screen navigation
     # -------------------------
     def clear_screens(self):
+        self.stop_welcome_pulse()
         for child in self.container.winfo_children():
             child.pack_forget()
 
     def show_welcome_screen(self):
         self.clear_screens()
         self.welcome_frame.pack(expand=True, fill="both")
+
+        # Reset run/session flags
         self.is_running_sequence = False
 
-        # Ensure correct button visibility
-        if self.paid:
-            self.welcome_canvas.itemconfig(self.start_button_win, state="normal")
-        else:
-            self.welcome_canvas.itemconfig(self.start_button_win, state="hidden")
+        # Reset payment / tap state for a NEW customer
+        self.session_paid = False
+        self._payment_in_progress = False
+        self._welcome_tap_enabled = True
+
+        # Reset subtitle text
+        try:
+            self.welcome_canvas.itemconfig(
+                self.subtitle_item,
+                text="Tap to pay & start"
+            )
+        except Exception:
+            pass
+
+        # Restart the subtle welcome animation (if you added it)
+        try:
+            self.start_welcome_pulse()
+        except Exception:
+            pass
+
+    def _get_font_with_size(self, base_font, size: int):
+        """
+        Returns a font tuple with the same family/weight as base_font but a new size.
+        Works for tuple-based fonts (most common in Tkinter apps).
+        """
+        if isinstance(base_font, tuple) and len(base_font) >= 2:
+            family = base_font[0]
+            rest = list(base_font[2:])  # weight/slant/etc
+            return (family, size, *rest)
+        return base_font  # fallback (won't resize if it's not a tuple)
+
+    def start_welcome_pulse(self):
+        """Start the pulsing animation on the welcome subtitle."""
+        self.stop_welcome_pulse()  # ensure no duplicate loops
+        self._welcome_pulse_on = True
+
+        # Base Y position (so we can bob around it)
+        self._welcome_subtitle_base_y = getattr(self, "_welcome_subtitle_base_y", None)
+        if self._welcome_subtitle_base_y is None:
+            # capture the current y as the base
+            coords = self.welcome_canvas.coords(self.subtitle_item)
+            if coords and len(coords) >= 2:
+                self._welcome_subtitle_base_y = coords[1]
+            else:
+                self._welcome_subtitle_base_y = 300  # fallback
+
+        # Pick a base size from your font_subtitle if possible
+        base_size = 0
+        if isinstance(self.font_subtitle, tuple) and len(self.font_subtitle) >= 2:
+            base_size = int(self.font_subtitle[1])
+        if base_size <= 0:
+            base_size = 32  # fallback default
+
+        self._welcome_pulse_state = 0  # 0..3 cycle
+
+        def _tick():
+            if not getattr(self, "_welcome_pulse_on", False):
+                return
+
+            # Cycle: bright -> dim -> bright -> dim
+            cycle = self._welcome_pulse_state % 4
+
+            # Subtle fade (white <-> light gray)
+            fill = "white" if cycle in (0, 2) else "#d9d9d9"
+
+            # Subtle bob (0px -> -3px -> 0px -> +3px)
+            bob = 0
+            if cycle == 1:
+                bob = -3
+            elif cycle == 3:
+                bob = 3
+
+            # Subtle size pulse (base -> base+1 -> base -> base+1)
+            size = base_size if cycle in (0, 2) else (base_size + 1)
+            font = self._get_font_with_size(self.font_subtitle, size)
+
+            try:
+                # Update text appearance
+                self.welcome_canvas.itemconfig(self.subtitle_item, fill=fill, font=font)
+
+                # Update position (keep x the same, bob y around base)
+                x, _ = self.welcome_canvas.coords(self.subtitle_item)
+                self.welcome_canvas.coords(self.subtitle_item, x, self._welcome_subtitle_base_y + bob)
+            except Exception:
+                # If the item doesn't exist yet, just stop gracefully
+                self.stop_welcome_pulse()
+                return
+
+            self._welcome_pulse_state += 1
+            self._welcome_pulse_after_id = self.root.after(450, _tick)  # adjust speed here
+
+        self._welcome_pulse_after_id = self.root.after(0, _tick)
+
+    def stop_welcome_pulse(self):
+        """Stop the pulsing animation."""
+        self._welcome_pulse_on = False
+        after_id = getattr(self, "_welcome_pulse_after_id", None)
+        if after_id:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+        self._welcome_pulse_after_id = None
 
     def show_capture_screen(self):
         self.clear_screens()
         self.capture_frame.pack(expand=True, fill="both")
 
-    # -------------------------
-    # Payment + flow
-    # -------------------------
-    def simulate_payment(self):
-        self.paid = True
-        self.pay_button.config(state="disabled", text="Paid")
-        self.welcome_canvas.itemconfig(self.start_button_win, state="normal")
-
     def start_sequence(self):
-        if not self.paid or self.is_running_sequence:
+        """
+        Entry point after successful payment.
+        This function must only run ONCE per paid session.
+        """
+
+        # Must have a successful payment
+        if not getattr(self, "session_paid", False):
             return
 
-        self.is_running_sequence = True
-        self.photo_index = 1
-        self.captured_files = []
-        self.show_capture_screen()
+        # Must not already be running
+        if getattr(self, "is_running_sequence", False):
+            return
 
-        # Splash for 2 seconds, then start Photo 1 countdown
-        self.set_splash(True)
-        self.root.after(2000, self.start_next_photo)
+        # Lock the sequence so it cannot start twice
+        self.is_running_sequence = True
+
+        # ---- END GUARD BLOCK ----
+
+        try:
+            # OPTIONAL: stop welcome animations if you have them
+            try:
+                self.stop_welcome_pulse()
+            except Exception:
+                pass
+
+            # Clear the welcome screen
+            self.clear_screens()
+
+            self.capture_frame.pack(expand=True, fill="both")
+
+            # Initialize capture state
+            self.photo_index = 1
+            self.total_photos = getattr(self, "total_photos", 4)  # default to 4 if unset
+            self.captured_files = []
+
+            # Show splash text
+            self.set_splash(True)
+
+            # Small pause, then begin photo sequence
+            self.root.after(1200, self.start_next_photo)
+
+        except Exception as e:
+            print("[ERROR] start_sequence failed:", e)
+            self.is_running_sequence = False
+            self.session_paid = False
+            self.show_welcome_screen()
+
+        except Exception as e:
+            print("[ERROR] start_sequence failed:", e)
+
+            # If something goes wrong, reset safely to welcome screen
+            self.is_running_sequence = False
+            self.session_paid = False
+            self.show_welcome_screen()
 
     def start_next_photo(self):
         if self.photo_index > self.total_photos:
@@ -770,34 +961,41 @@ class PhotoBoothUI:
             return False
 
     def cleanup_session_files_and_return(self):
-        # Delete captured originals
-        for f in self.captured_files:
+        # --- Delete captured originals ---
+        for f in getattr(self, "captured_files", []):
             try:
-                if os.path.exists(f):
+                if f and os.path.exists(f):
                     os.remove(f)
             except Exception as e:
                 print(f"[WARN] Could not delete {f}: {e}")
 
-        # Optional: delete the composed strip too
-        if self.last_composed_strip:
+        # --- Optional: delete the composed strip too ---
+        last_strip = getattr(self, "last_composed_strip", None)
+        if last_strip:
             try:
-                if os.path.exists(self.last_composed_strip):
-                    os.remove(self.last_composed_strip)
+                if os.path.exists(last_strip):
+                    os.remove(last_strip)
             except Exception as e:
                 print(f"[WARN] Could not delete composed strip: {e}")
 
-        # Reset session state
+        # --- Reset session state ---
         self.captured_files = []
         self.last_composed_strip = None
-        self.paid = False
 
-        # Reset welcome buttons to initial state
-        self.pay_button.config(state="normal", text="Pay (demo)")
-        self.welcome_canvas.itemconfig(self.start_button_win, state="hidden")
+        # Payment gate state (tap-to-pay flow)
+        self._payment_in_progress = False
 
+        # --- Return to welcome screen ---
         self.show_welcome_screen()
-        self.root.update_idletasks()
-        self.root.update()
+
+        # If your welcome screen uses a subtitle item, reset it (safe no-op if missing)
+        try:
+            self.welcome_canvas.itemconfig(self.subtitle_item, text="Tap to pay & start")
+        except Exception:
+            pass
+
+        # Let Tkinter process UI updates safely
+        self.root.after(0, lambda: None)
 
     def hide_template_grid(self):
         print("HIDING TEMPLATE COUNT:", len(self._template_grid_item_ids))
@@ -813,7 +1011,6 @@ class PhotoBoothUI:
                 self.cap.release()
         finally:
             self.root.destroy()
-
 
 def main():
     root = tk.Tk()
