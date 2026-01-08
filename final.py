@@ -27,6 +27,7 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 import stripe
+from PIL import Image
 
 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 STRIPE_READER_ID = os.environ["STRIPE_READER_ID"]
