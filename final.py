@@ -28,6 +28,12 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 import stripe
 from PIL import Image
+from pathlib import Path
+import os
+
+BASE_DIR = Path().resolve().parent  # folder where final.py lives
+os.chdir(BASE_DIR)  # makes all relative paths work from here
+TEMPLATES_DIR = BASE_DIR / "PhotoboothTemplates"
 
 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 STRIPE_READER_ID = os.environ["STRIPE_READER_ID"]
@@ -64,63 +70,66 @@ class TemplateDef:
     slots: List[Slot]
     size: Tuple[int, int]
 
-def load_templates(dir_path: str) -> list[TemplateDef]:
-    if not os.path.isdir(dir_path):
+def load_templates(dir_path: Path) -> list[TemplateDef]:
+    if not dir_path.is_dir():
         raise FileNotFoundError(f"Missing folder: {dir_path}")
 
-    files = os.listdir(dir_path)
-    pngs = {os.path.splitext(f)[0]: os.path.join(dir_path, f)
-            for f in files if f.lower().endswith(".png")}
-    jsons = {os.path.splitext(f)[0]: os.path.join(dir_path, f)
-             for f in files if f.lower().endswith(".json")}
+    pngs = {p.stem: p for p in dir_path.glob("*.png")}
+    jsons = {p.stem: p for p in dir_path.glob("*.json")}
 
-    keys = sorted(set(pngs.keys()) & set(jsons.keys()))
+    keys = sorted(pngs.keys() & jsons.keys())
     if not keys:
         raise FileNotFoundError(
             f"No templates found in {dir_path}.\n"
             f"Add matching pairs like: mytemplate.png + mytemplate.json"
         )
 
-    templates = []
+    templates: list[TemplateDef] = []
+
     for key in keys:
         png_path = pngs[key]
         json_path = jsons[key]
 
-        with open(json_path, "r", encoding="utf-8") as f:
+        with json_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
         name = data.get("name", key)
         slots_raw = data.get("slots", [])
-
         if len(slots_raw) != 4:
             raise ValueError(f"{json_path} must define exactly 4 slots.")
 
         defaults = data.get("defaults", {})
-        slots = []
+        slots: list[Slot] = []
 
         for s in slots_raw:
             merged = {**defaults, **s}
-            slots.append(Slot(
-                id=int(merged["id"]),
-                x=int(merged["x"]),
-                y=int(merged["y"]),
-                w=int(merged["w"]),
-                h=int(merged["h"]),
-                rotation=int(merged.get("rotation", 0))
-            ))
+            slots.append(
+                Slot(
+                    id=int(merged["id"]),
+                    x=int(merged["x"]),
+                    y=int(merged["y"]),
+                    w=int(merged["w"]),
+                    h=int(merged["h"]),
+                    rotation=int(merged.get("rotation", 0)),
+                )
+            )
 
-        w, h = Image.open(png_path).size
+        with Image.open(png_path) as im:
+            size = im.size
 
-        templates.append(TemplateDef(
-            key=key,
-            name=name,
-            png_path=png_path,
-            json_path=json_path,
-            slots=slots,
-            size=(w, h),
-        ))
+        templates.append(
+            TemplateDef(
+                key=key,
+                name=name,
+                png_path=str(png_path),
+                json_path=str(json_path),
+                slots=slots,
+                size=size,
+            )
+        )
 
     return templates
+
 
 def cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
     """Resize to cover target box, then center crop (no stretching)."""
@@ -1014,6 +1023,7 @@ class PhotoBoothUI:
             self.root.destroy()
 
 def main():
+    templates = load_templates(TEMPLATES_DIR)
     root = tk.Tk()
     PhotoBoothUI(root)
     root.mainloop()
