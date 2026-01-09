@@ -27,7 +27,7 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 import stripe
-from PIL import Image
+from PIL import Image, ImageTk
 from pathlib import Path
 import os
 import traceback
