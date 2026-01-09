@@ -218,6 +218,7 @@ class PhotoBoothUI:
         # If you want a welcome background image, set this path to your file.
         # Example: "assets/welcome_bg.jpg"
         self.welcome_bg_path = os.path.join(os.path.dirname(__file__), "stanfordwelcomebackground.jpg")
+        print("WELCOME BG PATH:", self.welcome_bg_path, "exists?", os.path.exists(self.welcome_bg_path))
         self.tk_welcome_bg = None  # keep ref if loaded
 
         # ---- fonts (use system fonts; you can change family names) ----
@@ -314,7 +315,7 @@ class PhotoBoothUI:
 
         # Optional: load a welcome background image (fills screen)
         self.tk_welcome_bg = None
-        if self.welcome_bg_path and HAS_PREVIEW:
+        if self.welcome_bg_path:
             try:
                 img = Image.open(self.welcome_bg_path)
                 img = img.resize(
