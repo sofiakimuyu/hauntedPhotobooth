@@ -137,38 +137,71 @@ def save_for_print(img: Image.Image, out_path: str, jpeg_quality: int = 95) -> s
         img.convert("RGB").save(out_path, "JPEG", quality=jpeg_quality)
     return out_path
 
-
 def try_print(file_path: str, printer_name: str, copies: int = 1) -> None:
-    """
-    Best-effort cross-platform printing.
-    - macOS: uses lp
-    - Windows: uses mspaint /pt
-    """
     system = platform.system().lower()
-
-    if copies < 1:
-        copies = 1
+    copies = max(1, int(copies))
 
     if "darwin" in system or "mac" in system:
-        # macOS: lp is the normal CLI print path
-        # -n copies sets number of copies
+        # macOS
         cmd = ["lp", "-d", printer_name, "-n", str(copies), file_path]
         subprocess.run(cmd, check=True)
 
     elif "windows" in system:
-        # Windows: mspaint /pt prints images to a named printer
-        # This will spawn briefly; depends on printer driver availability.
-        # Copies: mspaint doesn't reliably support copies via CLI; loop copies.
-        mspaint = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "mspaint.exe")
-        if not os.path.exists(mspaint):
-            mspaint = "mspaint"
+        # Windows: use PowerShell PrintTo (more reliable than mspaint for scaling/tiling)
+        ps_file = file_path.replace("'", "''")
+        ps_printer = printer_name.replace("'", "''")
+
+        ps = (
+            f"$p='{ps_printer}'; "
+            f"$f='{ps_file}'; "
+            "Start-Process -FilePath $f -Verb PrintTo -ArgumentList $p"
+        )
 
         for _ in range(copies):
-            cmd = [mspaint, "/pt", file_path, printer_name]
-            subprocess.run(cmd, check=True)
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True)
 
     else:
         raise RuntimeError(f"Printing not implemented for OS: {platform.system()}")
+
+
+def describe_sizes(template_img: Image.Image, composed: Image.Image, doubled: Image.Image) -> None:
+    tw, th = template_img.size
+    cw, ch = composed.size
+    dw, dh = doubled.size
+
+    print("\n=== IMAGE SIZE REPORT ===")
+    print(f"Template PNG size:  {tw} x {th} px")
+    print(f"Composed size:      {cw} x {ch} px")
+    print(f"Doubled size:       {dw} x {dh} px (2-up side-by-side, gap=0)")
+    print("=========================\n")
+
+
+def compare_to_target(doubled: Image.Image, target_w: int, target_h: int) -> None:
+    dw, dh = doubled.size
+
+    # Compute scale to FIT (contain) target while keeping aspect ratio
+    scale_fit = min(target_w / dw, target_h / dh)
+    fit_w = int(round(dw * scale_fit))
+    fit_h = int(round(dh * scale_fit))
+
+    # Compute scale to FILL (cover) target while keeping aspect ratio (would crop)
+    scale_cover = max(target_w / dw, target_h / dh)
+    cover_w = int(round(dw * scale_cover))
+    cover_h = int(round(dh * scale_cover))
+
+    print("=== TARGET PAPER COMPARISON ===")
+    print(f"Target paper pixels: {target_w} x {target_h} px")
+    print(f"Your doubled image:  {dw} x {dh} px")
+    print("")
+    print(f"FIT scale (no crop, may leave borders): {scale_fit:.4f} -> {fit_w} x {fit_h}")
+    if fit_w != target_w or fit_h != target_h:
+        print("  -> This WILL produce borders unless the driver does borderless scaling.")
+    else:
+        print("  -> Perfect FIT match (no border expected).")
+    print("")
+    print(f"COVER scale (fills paper, crops edges): {scale_cover:.4f} -> {cover_w} x {cover_h}")
+    print("  -> This prints borderless but may crop.")
+    print("===============================\n")
 
 
 def main():
@@ -210,8 +243,9 @@ def main():
     slots = parse_slots(data, template_json)
 
     composed = compose_into_template(template_png, slots, photo_paths)
+    template_img = Image.open(template_png).convert("RGBA")
     doubled = side_by_side(composed, gap=0)
-
+    describe_sizes(template_img, composed, doubled)
     # Save output
     out_path = args.output if os.path.isabs(args.output) else os.path.join(base_dir, args.output)
     out_path = save_for_print(doubled, out_path)
