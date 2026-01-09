@@ -30,9 +30,10 @@ import stripe
 from PIL import Image
 from pathlib import Path
 import os
+import traceback
 
-BASE_DIR = Path().resolve().parent  # folder where final.py lives
-os.chdir(BASE_DIR)  # makes all relative paths work from here
+
+BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "PhotoboothTemplates"
 
 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
@@ -70,65 +71,82 @@ class TemplateDef:
     slots: List[Slot]
     size: Tuple[int, int]
 
-def load_templates(dir_path: Path) -> list[TemplateDef]:
+def load_templates(dir_path) -> list[TemplateDef]:
+    # Accept str OR Path safely
+    dir_path = Path(dir_path)
+
     if not dir_path.is_dir():
         raise FileNotFoundError(f"Missing folder: {dir_path}")
 
+    # Collect png/json pairs by stem
     pngs = {p.stem: p for p in dir_path.glob("*.png")}
     jsons = {p.stem: p for p in dir_path.glob("*.json")}
 
-    keys = sorted(pngs.keys() & jsons.keys())
+    keys = sorted(set(pngs.keys()) & set(jsons.keys()))
     if not keys:
         raise FileNotFoundError(
-            f"No templates found in {dir_path}.\n"
-            f"Add matching pairs like: mytemplate.png + mytemplate.json"
+            f"No templates found in {dir_path}\n"
+            f"Expected matching .png + .json pairs"
         )
 
     templates: list[TemplateDef] = []
 
     for key in keys:
-        png_path = pngs[key]
-        json_path = jsons[key]
+        try:
+            print("Loading template key:", key)
 
-        with json_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            png_path = pngs[key]
+            json_path = jsons[key]
 
-        name = data.get("name", key)
-        slots_raw = data.get("slots", [])
-        if len(slots_raw) != 4:
-            raise ValueError(f"{json_path} must define exactly 4 slots.")
+            with json_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
 
-        defaults = data.get("defaults", {})
-        slots: list[Slot] = []
+            name = data.get("name", key)
 
-        for s in slots_raw:
-            merged = {**defaults, **s}
-            slots.append(
-                Slot(
-                    id=int(merged["id"]),
-                    x=int(merged["x"]),
-                    y=int(merged["y"]),
-                    w=int(merged["w"]),
-                    h=int(merged["h"]),
-                    rotation=int(merged.get("rotation", 0)),
+            # Safely handle null / missing slots
+            slots_raw = data.get("slots") or []
+            if len(slots_raw) != 4:
+                raise ValueError("must define exactly 4 slots")
+
+            defaults = data.get("defaults", {})
+            slots: list[Slot] = []
+
+            for s in slots_raw:
+                merged = {**defaults, **s}
+
+                slots.append(
+                    Slot(
+                        id=int(merged["id"]),
+                        x=int(merged["x"]),
+                        y=int(merged["y"]),
+                        w=int(merged["w"]),
+                        h=int(merged["h"]),
+                        rotation=int(merged.get("rotation", 0)),
+                    )
+                )
+
+            with Image.open(png_path) as im:
+                w, h = im.size
+
+            templates.append(
+                TemplateDef(
+                    key=key,
+                    name=name,
+                    png_path=str(png_path),
+                    json_path=str(json_path),
+                    slots=slots,
+                    size=(w, h),
                 )
             )
 
-        with Image.open(png_path) as im:
-            size = im.size
+        except Exception as e:
+            raise RuntimeError(
+                f"Template '{key}' failed to load ({json_path}): {e}"
+            ) from e
 
-        templates.append(
-            TemplateDef(
-                key=key,
-                name=name,
-                png_path=str(png_path),
-                json_path=str(json_path),
-                slots=slots,
-                size=size,
-            )
-        )
-
+    print("ABOUT TO RETURN templates length:", len(templates))
     return templates
+
 
 
 def cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
@@ -180,7 +198,8 @@ class PhotoBoothUI:
 
         # ---- template / printing state ----
         self.captured_files = []          # stores the 3 photo filenames from a session
-        self.templates_dir = os.path.join(os.path.dirname(__file__), "PhotoboothTemplates") # folder containing photo strip templates
+        self.templates_dir = Path(__file__).resolve().parent / "PhotoboothTemplates"  # folder containing photo strip templates
+
         self.printer_name = None          # optional: set to printer queue name
         self.last_composed_strip = None   # final composed strip image path
 
@@ -811,15 +830,26 @@ class PhotoBoothUI:
         # --- Load templates (expects PNG+JSON pairs) ---
         try:
             self.templates = load_templates(self.templates_dir)  # List[TemplateDef]
+            print("self.templates type:", type(self.templates))
+            print(
+                "TEMPLATES LOADED IN GRID:",
+                len(self.templates) if self.templates is not None else "None",
+                "from",
+                self.templates_dir
+            )
         except Exception as e:
+            print("\n--- TEMPLATE GRID ERROR TRACEBACK ---")
+            traceback.print_exc()
+            print("--- END TRACEBACK ---\n")
+
             self.template_canvas.itemconfig(
                 self.template_status_item,
                 state="normal",
-                text=f"Template load error:\n{e}"
+                text=f"Template load error:\n{e}",
+                width=900
             )
             self.template_canvas.tag_raise(self.template_status_item)
             self.templates = []
-            # No need to scroll if nothing is shown
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
             return
 
@@ -827,7 +857,8 @@ class PhotoBoothUI:
             self.template_canvas.itemconfig(
                 self.template_status_item,
                 state="normal",
-                text=f"No templates found in:\n{self.templates_dir}"
+                text=f"No templates found in:\n{self.templates_dir}",
+                width=900
             )
             self.template_canvas.tag_raise(self.template_status_item)
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
