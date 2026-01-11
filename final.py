@@ -23,22 +23,45 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox
 import json
-import os
-from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
 import stripe
 from PIL import Image, ImageTk
 from pathlib import Path
 import os
 import traceback
+import subprocess
+import platform
+from telemetry import Telemetry
+import glob
+import subprocess
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple
+import time
 
+
+
+telemetry = Telemetry(
+    booth_id="Stanford booth",
+    telegram_token="8537687055:AAHtcNOv2lQYRmMBvcDNK8idGF2EmUnT7c",
+    telegram_chat_id="8471596713",
+    roll_warn_1=143,
+    roll_warn_2=147
+)
+
+telemetry.install_crash_hook()
+START_TIME = time.time()
+telemetry.booth_started()
+# to keep track in case I have other booths in future
+
+# 🔴 TEMP TEST — REMOVE AFTER VERIFYING
+telemetry.print_result(ok=False, details="test fail")
+telemetry.print_result(ok=True, details="test success")
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "PhotoboothTemplates"
 
 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 STRIPE_READER_ID = os.environ["STRIPE_READER_ID"]
-import time
+
 
 # Optional preview stack
 try:
@@ -47,11 +70,6 @@ try:
     HAS_PREVIEW = True
 except Exception:
     HAS_PREVIEW = False
-import glob
-import subprocess
-
-from dataclasses import dataclass
-from typing import List, Tuple
 
 @dataclass
 class Slot:
@@ -161,8 +179,9 @@ def cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
     return img.crop((left, top, left + target_w, top + target_h))
 
 
+
 def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -> Image.Image:
-    """Compose the template with photos in slot-id order."""
+    """Compose the template with photos in slot-id order (robust alpha-safe paste)."""
     base = Image.open(template_png_path).convert("RGBA")
 
     # Expect exactly 4 photos for now
@@ -174,14 +193,73 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -
     if len(slots_sorted) != 4:
         raise ValueError(f"Template JSON must define exactly 4 slots (got {len(slots_sorted)}).")
 
+    base_dir = os.path.dirname(__file__)
+
     for slot, photo_path in zip(slots_sorted, photo_paths):
-        img = Image.open(photo_path).convert("RGBA")
-        if slot.rotation:
+        photo_path = str(photo_path)
+        if not os.path.isabs(photo_path):
+            photo_path = os.path.join(base_dir, photo_path)
+
+        # Open + normalize to RGBA so we always have an alpha channel to use as a mask
+        with Image.open(photo_path) as im:
+            img = im.convert("RGBA")
+
+        if getattr(slot, "rotation", 0):
             img = img.rotate(slot.rotation, expand=True)
+
+        # cover_resize might return RGB depending on its implementation, so enforce RGBA after
         fitted = cover_resize(img, slot.w, slot.h)
-        base.paste(fitted, (slot.x, slot.y), fitted)
+        if fitted.mode != "RGBA":
+            fitted = fitted.convert("RGBA")
+
+        # ✅ Valid mask: alpha channel (mode 'L') — prevents "bad transparency mask"
+        mask = fitted.split()[-1]
+        base.paste(fitted, (slot.x, slot.y), mask)
 
     return base
+
+
+def side_by_side(
+    img: Image.Image,
+    gap: int = 40,
+    bg: Tuple[int, int, int, int] = (255, 255, 255, 255)
+) -> Image.Image:
+    """
+    Duplicate the composed template image and place two copies side-by-side.
+    """
+    img = img.convert("RGBA")
+    w, h = img.size
+
+    out = Image.new("RGBA", (w * 2 + gap, h), bg)
+    out.paste(img, (0, 0), img)
+    out.paste(img, (w + gap, 0), img)
+
+    return out
+
+def print_image_windows(image_path: str, printer_name: str | None = None):
+    """
+    Print an image on Windows using MS Paint.
+    If printer_name is None, Windows default printer is used.
+    """
+    if platform.system() != "Windows":
+        print("[PRINT] Skipped (not Windows)")
+        return
+
+    mspaint = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32",
+        "mspaint.exe"
+    )
+
+    if printer_name:
+        cmd = [mspaint, "/pt", image_path, printer_name]
+    else:
+        cmd = [mspaint, "/pt", image_path]
+
+    print("[PRINT] Sending to printer:", image_path)
+    subprocess.run(cmd, check=True)
+
+
 
 class PhotoBoothUI:
     def __init__(self, root: tk.Tk):
@@ -594,7 +672,11 @@ class PhotoBoothUI:
         # Lock the sequence so it cannot start twice
         self.is_running_sequence = True
 
-        # ---- END GUARD BLOCK ----
+        # ✅ TELEMETRY: session officially starts here (after payment, before capture begins)
+        try:
+            telemetry.session_started()
+        except Exception:
+            pass
 
         try:
             # OPTIONAL: stop welcome animations if you have them
@@ -684,17 +766,21 @@ class PhotoBoothUI:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"photo_{self.photo_index}_{ts}.jpg"
 
+        # Always save photos next to final.py (cross-platform safe)
+        base_dir = os.path.dirname(__file__)
+        filepath = os.path.join(base_dir, filename)
+
         if HAS_PREVIEW and self.latest_frame_bgr is not None:
-            ok = cv2.imwrite(filename, self.latest_frame_bgr)
+            ok = cv2.imwrite(filepath, self.latest_frame_bgr)
             if ok:
-                self.captured_files.append(filename)  # ✅ append ONLY after success
-                print(f"[OK] Saved {filename}")
+                self.captured_files.append(filepath)  # ✅ FULL PATH
+                print(f"[OK] Saved {filepath}")
             else:
-                print(f"[WARN] Could not save {filename}")
+                print(f"[WARN] Could not save {filepath}")
         else:
             # Simulation mode (no camera)
-            self.captured_files.append(filename)  # still record it
-            print(f"[SIM] Captured {filename} (no camera frame available)")
+            self.captured_files.append(filepath)  # still full path
+            print(f"[SIM] Captured {filepath} (no camera frame available)")
 
     # -------------------------
     # Camera preview loop
@@ -930,6 +1016,14 @@ class PhotoBoothUI:
             self.template_canvas.tag_raise(self.template_status_item)
             return
 
+        # ✅ TELEMETRY: template chosen (daily + lifetime)
+        try:
+            # Use a stable identifier (prefer an explicit id/name; fallback to file stem)
+            template_id = getattr(tdef, "template_id", None) or getattr(tdef, "name", None) or tdef.png_path.stem
+            telemetry.template_chosen(str(template_id))
+        except Exception:
+            pass
+
         # Hide template thumbnails so only preview remains
         self.hide_template_grid()
         self.template_canvas.itemconfig(self.template_title_item, state="hidden")
@@ -948,9 +1042,27 @@ class PhotoBoothUI:
             return
 
         # Save composed strip to a file (so we can print it)
-        out_path = f"strip_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        composed_img.convert("RGB").save(out_path, quality=95)
+        base_dir = os.path.dirname(__file__)
+        out_name = f"strip_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        # --- Create doubled strip ---
+        double_img = side_by_side(composed_img)
+
+        # --- Save doubled strip (print-ready) ---
+        base_dir = os.path.dirname(__file__)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_name = f"strip_double_{ts}.png"
+        out_path = os.path.join(base_dir, out_name)
+
+        double_img.convert("RGB").save(out_path, quality=95)
         self.last_composed_strip = out_path
+
+        print("[OK] Saved doubled strip:", out_path)
+
+        # --- 3. Send to printer (Windows PC) ---
+        try:
+            print_image_windows(self.last_composed_strip, self.printer_name)
+        except Exception as e:
+            print("[WARN] Printing failed:", e)
 
         self.template_canvas.itemconfig(self.template_preview_item, state="hidden")
 
@@ -974,20 +1086,36 @@ class PhotoBoothUI:
         self.template_canvas.tag_raise(self.template_status_item)
 
     def _print_then_done(self, composed_path: str):
-        ok = self.print_file(composed_path)
+        # Try to print
+        ok, details = self.print_file(composed_path)
+
+        # ✅ TELEMETRY: count prints (lifetime + daily) + paper roll warnings/reset
+        try:
+            telemetry.print_result(ok=ok, details=details)
+        except Exception:
+            pass
+
         if not ok:
-            self.template_canvas.itemconfig(self.template_status_item, state="normal",
-                                            text="Print failed.\nReturning to start.")
+            self.template_canvas.itemconfig(
+                self.template_status_item,
+                state="normal",
+                text="Print failed.\nReturning to start."
+            )
             self.root.after(4000, self.cleanup_session_files_and_return)
             return
 
         self.template_canvas.itemconfig(self.template_status_item, state="normal", text="Done!")
         self.root.after(2000, self.cleanup_session_files_and_return)
 
-    def print_file(self, file_path: str) -> bool:
+    def print_file(self, file_path: str) -> tuple[bool, str]:
         """
         macOS print via `lp`.
         If you set self.printer_name, it will target that printer.
+
+        Returns:
+            (ok, details)
+            - ok: True if the job was queued successfully
+            - details: stderr/stdout or exception string (trimmed), useful for telemetry
         """
         try:
             cmd = ["lp"]
@@ -996,18 +1124,47 @@ class PhotoBoothUI:
             cmd.append(file_path)
 
             # This queues the job; it does not guarantee paper came out.
-            subprocess.run(cmd, check=True, capture_output=True)
-            return True
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+            details = (result.stdout or "").strip()
+            return True, details[:400]  # keep it short
+
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or "").strip() if hasattr(e, "stderr") else ""
+            stdout = (e.stdout or "").strip() if hasattr(e, "stdout") else ""
+            details = (stderr or stdout or str(e)).strip()
+            print(f"[PRINT ERROR] {details}")
+            return False, details[:400]
+
         except Exception as e:
-            print(f"[PRINT ERROR] {e}")
-            return False
+            details = str(e).strip()
+            print(f"[PRINT ERROR] {details}")
+            return False, details[:400]
 
     def cleanup_session_files_and_return(self):
+        base_dir = os.path.dirname(__file__)
+
+        def _abs(p: str) -> str:
+            if not p:
+                return p
+            p = str(p)
+            return p if os.path.isabs(p) else os.path.join(base_dir, p)
+
+        deleted = 0
+
         # --- Delete captured originals ---
-        for f in getattr(self, "captured_files", []):
+        for f in list(getattr(self, "captured_files", []) or []):
             try:
-                if f and os.path.exists(f):
-                    os.remove(f)
+                f_abs = _abs(f)
+                print("[CLEANUP] trying delete:", f_abs)
+
+                if f_abs and os.path.exists(f_abs):
+                    os.remove(f_abs)
+                    deleted += 1
+                    print("[CLEANUP] deleted:", f_abs)
+                else:
+                    print("[CLEANUP] not found:", f_abs)
+
             except Exception as e:
                 print(f"[WARN] Could not delete {f}: {e}")
 
@@ -1015,29 +1172,28 @@ class PhotoBoothUI:
         last_strip = getattr(self, "last_composed_strip", None)
         if last_strip:
             try:
-                if os.path.exists(last_strip):
-                    os.remove(last_strip)
+                strip_abs = _abs(last_strip)
+                print("[CLEANUP] trying delete strip:", strip_abs)
+
+                if os.path.exists(strip_abs):
+                    os.remove(strip_abs)
+                    deleted += 1
+                    print("[CLEANUP] deleted strip:", strip_abs)
+                else:
+                    print("[CLEANUP] strip not found:", strip_abs)
+
             except Exception as e:
                 print(f"[WARN] Could not delete composed strip: {e}")
 
         # --- Reset session state ---
         self.captured_files = []
         self.last_composed_strip = None
-
-        # Payment gate state (tap-to-pay flow)
         self._payment_in_progress = False
+
+        print(f"[CLEANUP] done. deleted {deleted} files.")
 
         # --- Return to welcome screen ---
         self.show_welcome_screen()
-
-        # If your welcome screen uses a subtitle item, reset it (safe no-op if missing)
-        try:
-            self.welcome_canvas.itemconfig(self.subtitle_item, text="Tap to pay & start")
-        except Exception:
-            pass
-
-        # Let Tkinter process UI updates safely
-        self.root.after(0, lambda: None)
 
     def hide_template_grid(self):
         print("HIDING TEMPLATE COUNT:", len(self._template_grid_item_ids))
@@ -1056,9 +1212,42 @@ class PhotoBoothUI:
 
 def main():
     templates = load_templates(TEMPLATES_DIR)
+
     root = tk.Tk()
-    PhotoBoothUI(root)
+
+    # Heartbeat every 10 minutes
+    def schedule_heartbeat():
+        try:
+            telemetry.heartbeat(uptime_start=START_TIME)
+        except Exception:
+            pass
+        root.after(10 * 60 * 1000, schedule_heartbeat)
+
+    schedule_heartbeat()
+
+    # Build UI (pass templates if your UI needs them)
+    PhotoBoothUI(root)  # or PhotoBoothUI(root, templates)
+
+    # Window close handler
+    def on_close():
+        try:
+            telemetry.log_event("booth_stopped")
+        except Exception:
+            pass
+
+        try:
+            telemetry.send_telegram(f"🛑 Booth stopped ({telemetry.booth_id})")
+        except Exception:
+            pass
+
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+
+    # ✅ KEEP THE APP RUNNING
     root.mainloop()
+
+
 
 
 if __name__ == "__main__":
