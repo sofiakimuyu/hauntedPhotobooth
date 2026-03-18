@@ -2,15 +2,17 @@
   "booth_id": "Stanford booth",
   "created_at": "2026-01-10T09:04:30",
   "lifetime": {
-    "sessions_started": 2,
+    "sessions_started": 4,
     "sessions_completed": 0,
     "photos_taken": 0,
-    "prints_total": 19,
-    "prints_success": 10,
-    "prints_failed": 9,
+    "prints_total": 25,
+    "prints_success": 14,
+    "prints_failed": 11,
     "template_counts": {
       "Template 1": 1,
-      "Template 5": 1
+      "Template 5": 1,
+      "Template 4": 1,
+      "Template 3": 1
     }
   },
   "daily": {
@@ -25,10 +27,32 @@
         "Template 1": 1,
         "Template 5": 1
       }
+    },
+    "2026-01-12": {
+      "sessions_started": 1,
+      "sessions_completed": 0,
+      "photos_taken": 0,
+      "prints_total": 3,
+      "prints_success": 2,
+      "prints_failed": 1,
+      "template_counts": {
+        "Template 4": 1
+      }
+    },
+    "2026-01-13": {
+      "sessions_started": 1,
+      "sessions_completed": 0,
+      "photos_taken": 0,
+      "prints_total": 3,
+      "prints_success": 2,
+      "prints_failed": 1,
+      "template_counts": {
+        "Template 3": 1
+      }
     }
   },
   "paper": {
-    "roll_prints": 9,
+    "roll_prints": 13,
     "last_reset_at": null,
     "notified_at": {
       "143": false,
@@ -36,11 +60,9 @@
     }
   },
   "last_event": {
-    "ts": "2026-01-10T20:46:35",
+    "ts": "2026-01-13T20:50:31",
     "booth_id": "Stanford booth",
-    "type": "print_success",
-    "data": {
-      "details": "request id is HP_LaserJet_MFP_M130fw__5FB0F4_-63 (1 file(s))"
-    }
+    "type": "booth_stopped",
+    "data": {}
   }
 }
