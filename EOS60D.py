@@ -208,28 +208,44 @@ def print_image_windows(file_path: str, printer_name: str | None = None):
         os.startfile(file_path, "print")
     except Exception as e:
         raise RuntimeError(f"Windows print failed: {e}")
+
 def print_pil_image(img: Image.Image, printer_name: str | None = None):
     """
-    Print a PIL image using a temporary JPG file, then remove it.
+    Print a PIL image using a temporary JPG file.
+    On Windows, wait a few seconds before deleting the temp file so the
+    print handler has time to read it.
     """
     with NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         temp_path = Path(tmp.name)
 
     try:
-        img.convert("RGB").save(temp_path)
-        print_image_windows(str(temp_path), printer_name)
+        img.convert("RGB").save(temp_path, quality=95)
+
+        if printer_name:
+            print(f"[PRINT] printer_name='{printer_name}' requested, using default Windows printer.")
+
+        print(f"[PRINT] Sending temp file to printer: {temp_path}")
+        os.startfile(str(temp_path), "print")
+
+        # IMPORTANT: give Windows time to open/read the file
+        time.sleep(8)
+
         telemetry.print_result(ok=True, details="printed successfully")
 
     except Exception as e:
         print("[PRINT ERROR]", e)
-        telemetry.print_result(ok=False, details=str(e))
+        try:
+            telemetry.print_result(ok=False, details=str(e))
+        except Exception:
+            pass
+        raise
 
     finally:
         try:
-            temp_path.unlink()
+            temp_path.unlink(missing_ok=True)
             print(f"[CLEANUP] Deleted temp print file {temp_path}")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WARN] Could not delete temp print file {temp_path}: {e}")
 
 
 def load_templates(dir_path) -> list[TemplateDef]:
@@ -842,7 +858,7 @@ class PhotoBoothUI:
 
             # Move to next photo after a short beat
             self.photo_index += 1
-            self.root.after(600, self.start_next_photo)
+            self.root.after(2000, self.start_next_photo)
             return
 
         self.capture_canvas.itemconfig(
@@ -881,12 +897,15 @@ class PhotoBoothUI:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             output_path = INCOMING_DIR / f"photo_{self.photo_index}_{ts}.jpg"
 
-            # Optional flash effect
+            # Flash effect
             self.capture_canvas.configure(bg="white")
             self.root.update()
             time.sleep(0.1)
             self.capture_canvas.configure(bg="black")
             self.root.update()
+
+            # Give camera a moment before triggering
+            time.sleep(1.0)
 
             saved_path = capture_photo_gphoto(output_path)
 
@@ -895,9 +914,10 @@ class PhotoBoothUI:
 
         except Exception as e:
             print(f"[CAPTURE ERROR] Photo {self.photo_index} failed: {e}")
-            messagebox.showerror("Camera Error", f"Could not capture photo {self.photo_index}.\n\n{e}")
-
-            # Abort this session and return to welcome
+            messagebox.showerror(
+                "Camera Error",
+                f"Could not capture photo {self.photo_index}.\n\n{e}"
+            )
             self.is_running_sequence = False
             self.session_paid = False
             self.show_welcome_screen()
@@ -1135,7 +1155,12 @@ class PhotoBoothUI:
         self.root.update()
 
         try:
-            # Compose final strip using the REAL camera photos
+            # Debug: confirm which captured files are being used
+            print("[DEBUG] Captured files going into compose:")
+            for i, p in enumerate(self.captured_files[:needed], start=1):
+                print(f"  [{i}] {p}")
+
+            # Compose final strip using the real camera photos
             composed_img = compose(
                 tdef.png_path,
                 tdef.slots,
@@ -1145,18 +1170,32 @@ class PhotoBoothUI:
             # Create doubled print-ready strip
             double_img = side_by_side(composed_img)
 
-            # Save doubled strip
+            # Save doubled strip as JPG for more reliable Windows printing
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_name = f"strip_double_{ts}.png"
+            out_name = f"strip_double_{ts}.jpg"
             out_path = Path(__file__).resolve().parent / out_name
 
-            double_img.convert("RGB").save(out_path, quality=95)
+            rgb_img = double_img.convert("RGB")
+            rgb_img.save(out_path, format="JPEG", quality=95)
             self.last_composed_strip = str(out_path)
 
             print("[OK] Saved doubled strip:", out_path)
 
-            # IMPORTANT: now that the strip is successfully composed/saved,
-            # delete the original camera captures for privacy/cleanup.
+            # Optional preview on screen so you can confirm composition is not blank
+            try:
+                preview_img = rgb_img.copy()
+                preview_img.thumbnail((700, 1200), Image.LANCZOS)
+                self._composed_preview_ref = ImageTk.PhotoImage(preview_img)
+
+                self.template_canvas.itemconfig(
+                    self.template_preview_item,
+                    image=self._composed_preview_ref,
+                    state="normal"
+                )
+            except Exception as preview_error:
+                print("[WARN] Could not show composed preview:", preview_error)
+
+            # Delete original camera captures from computer after strip is saved
             try:
                 delete_files([Path(p) for p in self.captured_files[:needed]])
                 self.captured_files = []
@@ -1171,14 +1210,8 @@ class PhotoBoothUI:
                 text=f"Compose error:\n{e}"
             )
             self.template_canvas.tag_raise(self.template_status_item)
+            print("[COMPOSE ERROR]", e)
             return
-
-        # Hide preview image item unless you later decide to show one
-        self.template_canvas.itemconfig(
-            self.template_preview_item,
-            image=None,
-            state="hidden"
-        )
 
         # Printing overlay
         self.template_canvas.itemconfig(
@@ -1189,7 +1222,7 @@ class PhotoBoothUI:
         self.template_canvas.tag_raise(self.template_status_item)
 
         # Print, then continue flow
-        self.root.after(500, lambda: self._print_then_done(str(out_path)))
+        self.root.after(1000, lambda: self._print_then_done(str(out_path)))
 
     def show_printing_message(self):
         self.template_canvas.itemconfig(
