@@ -185,59 +185,69 @@ def delete_files(paths: list[Path]):
 
 def print_image_windows(file_path: str, printer_name: str | None = None):
     """
-    Print an image file on Windows.
-    If printer_name is provided, try to print to that printer.
-    Otherwise use the default printer.
+    Print an image directly to a Windows printer with no dialog.
+    Uses the installed printer driver via GDI.
+
+    Requires:
+        pip install pywin32
     """
-    import os
-    import subprocess
     from pathlib import Path
+    import win32print
+    import win32ui
+    from PIL import Image, ImageWin
 
     file_path = str(Path(file_path).resolve())
-
-    if not os.path.exists(file_path):
+    if not Path(file_path).exists():
         raise FileNotFoundError(f"Print file not found: {file_path}")
 
-    # Simplest reliable Windows approach: use the default associated print action
-    if printer_name:
-        # If you want specific-printer support later, we can swap this for pywin32.
-        # For now, warn and use default printer.
-        print(f"[PRINT] printer_name='{printer_name}' requested, using default Windows printer instead.")
+    if not printer_name:
+        printer_name = win32print.GetDefaultPrinter()
+
+    img = Image.open(file_path).convert("RGB")
+
+    hdc = win32ui.CreateDC()
+    hdc.CreatePrinterDC(printer_name)
 
     try:
-        os.startfile(file_path, "print")
-    except Exception as e:
-        raise RuntimeError(f"Windows print failed: {e}")
+        printable_w = hdc.GetDeviceCaps(8)   # HORZRES
+        printable_h = hdc.GetDeviceCaps(10)  # VERTRES
+
+        img_w, img_h = img.size
+        scale = min(printable_w / img_w, printable_h / img_h)
+        draw_w = int(img_w * scale)
+        draw_h = int(img_h * scale)
+
+        x1 = (printable_w - draw_w) // 2
+        y1 = (printable_h - draw_h) // 2
+        x2 = x1 + draw_w
+        y2 = y1 + draw_h
+
+        hdc.StartDoc(Path(file_path).name)
+        hdc.StartPage()
+
+        dib = ImageWin.Dib(img)
+        dib.draw(hdc.GetHandleOutput(), (x1, y1, x2, y2))
+
+        hdc.EndPage()
+        hdc.EndDoc()
+
+    finally:
+        hdc.DeleteDC()
 
 def print_pil_image(img: Image.Image, printer_name: str | None = None):
     """
-    Print a PIL image using a temporary JPG file.
-    On Windows, wait a few seconds before deleting the temp file so the
-    print handler has time to read it.
+    Print a PIL image using a temporary JPG file, then remove it.
     """
     with NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         temp_path = Path(tmp.name)
 
     try:
-        img.convert("RGB").save(temp_path, quality=95)
-
-        if printer_name:
-            print(f"[PRINT] printer_name='{printer_name}' requested, using default Windows printer.")
-
-        print(f"[PRINT] Sending temp file to printer: {temp_path}")
-        os.startfile(str(temp_path), "print")
-
-        # IMPORTANT: give Windows time to open/read the file
-        time.sleep(8)
-
-        telemetry.print_result(ok=True, details="printed successfully")
+        img.convert("RGB").save(temp_path, format="JPEG", quality=95)
+        print_image_windows(str(temp_path), printer_name)
+        print(f"[PRINT] Sent to printer: {temp_path}")
 
     except Exception as e:
         print("[PRINT ERROR]", e)
-        try:
-            telemetry.print_result(ok=False, details=str(e))
-        except Exception:
-            pass
         raise
 
     finally:
@@ -1262,15 +1272,9 @@ class PhotoBoothUI:
         self.root.after(2000, self.cleanup_session_files_and_return)
 
     def print_file(self, file_path: str) -> tuple[bool, str]:
-        """
-        Print a file using the Windows image-print helper.
-        Returns:
-            (ok, details)
-        """
         try:
             with Image.open(file_path) as img:
                 print_pil_image(img, self.printer_name)
-
             return True, "Printed successfully"
 
         except Exception as e:
