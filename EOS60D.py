@@ -183,7 +183,31 @@ def delete_files(paths: list[Path]):
         except Exception as e:
             print(f"[CLEANUP ERROR] {p}: {e}")
 
+def print_image_windows(file_path: str, printer_name: str | None = None):
+    """
+    Print an image file on Windows.
+    If printer_name is provided, try to print to that printer.
+    Otherwise use the default printer.
+    """
+    import os
+    import subprocess
+    from pathlib import Path
 
+    file_path = str(Path(file_path).resolve())
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Print file not found: {file_path}")
+
+    # Simplest reliable Windows approach: use the default associated print action
+    if printer_name:
+        # If you want specific-printer support later, we can swap this for pywin32.
+        # For now, warn and use default printer.
+        print(f"[PRINT] printer_name='{printer_name}' requested, using default Windows printer instead.")
+
+    try:
+        os.startfile(file_path, "print")
+    except Exception as e:
+        raise RuntimeError(f"Windows print failed: {e}")
 def print_pil_image(img: Image.Image, printer_name: str | None = None):
     """
     Print a PIL image using a temporary JPG file, then remove it.
