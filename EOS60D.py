@@ -19,6 +19,7 @@ import time
 import subprocess
 import shutil
 from tempfile import NamedTemporaryFile
+from datetime import datetime
 
 # where store camera photos on the PC
 INCOMING_DIR = Path(r"C:\photoboothphotos\incoming")
@@ -74,48 +75,107 @@ class TemplateDef:
 # Define all the important functions we will need later
 
 #Wait for a newly imported JPG to appear in INCOMING_DIR.  Returns the Path to the new file, or None if timed out.
-def wait_for_new_import(existing_files: set, timeout: int = 15) -> Path:
+def to_wsl_path(path: Path) -> str:
     """
-    Wait for a new file to appear in INCOMING_DIR.
-    Returns the Path of the new file.
+    Convert a Windows path like:
+        C:\photobooth\incoming\img.jpg
+    into a WSL path like:
+        /mnt/c/photobooth/incoming/img.jpg
     """
-    start = time.time()
-
-    while time.time() - start < timeout:
-        current_files = set(INCOMING_DIR.glob("*.jpg") | INCOMING_DIR.glob("*.jpeg"))
-
-        new_files = current_files - existing_files
-        if new_files:
-            # Return the newest file (most recently modified)
-            newest = max(new_files, key=lambda p: p.stat().st_mtime)
-            time.sleep(0.3)
-            return newest
-
-        time.sleep(0.2)
-
-    raise TimeoutError("No new photo detected within timeout.")
+    path = Path(path).resolve()
+    drive = path.drive[0].lower()
+    rest = str(path).replace("\\", "/")[2:]  # remove "C:"
+    return f"/mnt/{drive}{rest}"
 
 
-def collect_n_photos(n: int = 4) -> list[Path]:
+def capture_photo_gphoto(output_path: Path) -> Path:
     """
-    Wait for n new photos to appear in INCOMING_DIR.
-    Returns list of Paths in capture order.
+    Use gphoto2 through WSL to trigger the camera and download one image
+    directly to output_path.
+
+    This version downloads the captured image to the computer and then
+    attempts to delete the just-captured file from the camera as well.
     """
-    collected = []
-    seen = set(INCOMING_DIR.glob("*.jpg") | INCOMING_DIR.glob("*.jpeg"))
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    wsl_output = to_wsl_path(output_path)
+
+    # Step 1: capture and download to computer
+    capture_cmd = [
+        "wsl",
+        "gphoto2",
+        "--capture-image-and-download",
+        "--filename",
+        wsl_output,
+    ]
+
+    print("[CAMERA] Running:", " ".join(capture_cmd))
+    result = subprocess.run(capture_cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            "gphoto2 capture failed.\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+
+    if not output_path.exists():
+        raise FileNotFoundError(
+            f"Capture completed but file was not found: {output_path}"
+        )
+
+    # Step 2: best-effort delete from camera storage too
+    # This may vary by camera model / gphoto2 driver support.
+    delete_cmd = [
+        "wsl",
+        "gphoto2",
+        "--delete-all-files",
+        "--recurse",
+    ]
+
+    print("[CAMERA] Attempting camera cleanup:", " ".join(delete_cmd))
+    delete_result = subprocess.run(delete_cmd, capture_output=True, text=True)
+
+    if delete_result.returncode != 0:
+        print(
+            "[WARN] Photo downloaded, but delete-from-camera may have failed.\n"
+            f"STDOUT:\n{delete_result.stdout}\n"
+            f"STDERR:\n{delete_result.stderr}"
+        )
+    else:
+        print("[CAMERA] Deleted files from camera storage.")
+
+    return output_path
+
+
+def capture_n_photos_gphoto(n: int = 4, pause_s: float = 0.8) -> list[Path]:
+    """
+    Capture n photos in sequence using gphoto2.
+    Saves them into INCOMING_DIR and returns the file paths in order.
+    """
+    captured: list[Path] = []
 
     for i in range(n):
-        print(f"[CAMERA] Waiting for photo {i+1}/{n}...")
-        new_file = wait_for_new_import(seen)
-        print(f"[CAMERA] Got photo: {new_file.name}")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        output_path = INCOMING_DIR / f"capture_{ts}_{i + 1}.jpg"
 
-        collected.append(new_file)
-        seen.add(new_file)
+        print(f"[CAMERA] Capturing photo {i + 1}/{n}...")
+        photo_path = capture_photo_gphoto(output_path)
+        print(f"[CAMERA] Saved: {photo_path}")
 
-    return collected
+        captured.append(photo_path)
 
-# Delete files safely (used for privacy cleanup).
+        if i < n - 1:
+            time.sleep(pause_s)
+
+    return captured
+
+
 def delete_files(paths: list[Path]):
+    """
+    Delete files after use for privacy / cleanup.
+    """
     for p in paths:
         try:
             p.unlink(missing_ok=True)
@@ -123,21 +183,17 @@ def delete_files(paths: list[Path]):
         except Exception as e:
             print(f"[CLEANUP ERROR] {p}: {e}")
 
-# send to printer
+
 def print_pil_image(img: Image.Image, printer_name: str | None = None):
     """
-    Print a PIL image using a temporary file (auto-deleted after printing).
+    Print a PIL image using a temporary JPG file, then remove it.
     """
-
     with NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         temp_path = Path(tmp.name)
 
     try:
-        # Save as RGB for printer compatibility
         img.convert("RGB").save(temp_path)
-
         print_image_windows(str(temp_path), printer_name)
-
         telemetry.print_result(ok=True, details="printed successfully")
 
     except Exception as e:
@@ -152,15 +208,15 @@ def print_pil_image(img: Image.Image, printer_name: str | None = None):
             pass
 
 
-# Go into the photobooth templates folder and turn the png and json files into usable templates
 def load_templates(dir_path) -> list[TemplateDef]:
-    # Accept str OR Path safely
+    """
+    Load all matching .png + .json template pairs from a folder.
+    """
     dir_path = Path(dir_path)
 
     if not dir_path.is_dir():
         raise FileNotFoundError(f"Missing folder: {dir_path}")
 
-    # Collect png/json pairs by stem
     pngs = {p.stem: p for p in dir_path.glob("*.png")}
     jsons = {p.stem: p for p in dir_path.glob("*.json")}
 
@@ -168,14 +224,14 @@ def load_templates(dir_path) -> list[TemplateDef]:
     if not keys:
         raise FileNotFoundError(
             f"No templates found in {dir_path}\n"
-            f"Expected matching .png + .json pairs"
+            "Expected matching .png + .json pairs"
         )
 
     templates: list[TemplateDef] = []
 
     for key in keys:
         try:
-            print("Loading template key:", key)
+            print("Loading template:", key)
 
             png_path = pngs[key]
             json_path = jsons[key]
@@ -184,18 +240,16 @@ def load_templates(dir_path) -> list[TemplateDef]:
                 data = json.load(f)
 
             name = data.get("name", key)
-
-            # Safely handle null / missing slots
             slots_raw = data.get("slots") or []
+
             if len(slots_raw) != 4:
-                raise ValueError("must define exactly 4 slots")
+                raise ValueError("Template must define exactly 4 slots")
 
             defaults = data.get("defaults", {})
             slots: list[Slot] = []
 
             for s in slots_raw:
                 merged = {**defaults, **s}
-
                 slots.append(
                     Slot(
                         id=int(merged["id"]),
@@ -226,46 +280,50 @@ def load_templates(dir_path) -> list[TemplateDef]:
                 f"Template '{key}' failed to load ({json_path}): {e}"
             ) from e
 
-    print("ABOUT TO RETURN templates length:", len(templates))
+    print("Loaded templates:", len(templates))
     return templates
 
-# Ensures the photo taken by the camera fits into the template slot; it aims to fully cover the slot, but if that is not possible it centers the crop to the exact size (no distortion)
+
 def cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
-    """Resize to cover target box, then center crop (no stretching)."""
+    """
+    Resize to fully cover the target box, then center crop.
+    No stretching.
+    """
     iw, ih = img.size
     scale = max(target_w / iw, target_h / ih)
     nw, nh = int(iw * scale), int(ih * scale)
     img = img.resize((nw, nh), Image.LANCZOS)
+
     left = (nw - target_w) // 2
     top = (nh - target_h) // 2
     return img.crop((left, top, left + target_w, top + target_h))
 
-# takes a template background PNG and the slot definitions for that template then fills it with the 4 captured photo file paths and returns one final composed PIL image with the photos pasted into the template.
-def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -> Image.Image:
-    """Compose the template with photos in slot-id order (robust alpha-safe paste)."""
 
+def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -> Image.Image:
+    """
+    Fill a template background with the 4 captured photos in slot order.
+    Returns one final composed PIL image.
+    """
     template_path = Path(template_png_path)
 
     with Image.open(template_path) as im:
         base = im.convert("RGBA")
 
-    # Expect exactly 4 photos
     if len(photo_paths) != 4:
-        raise ValueError(f"Expected exactly 4 photo paths (got {len(photo_paths)}).")
+        raise ValueError(f"Expected exactly 4 photo paths, got {len(photo_paths)}.")
 
-    # Ensure slot order is 1..4
     slots_sorted = sorted(slots, key=lambda s: s.id)
     if len(slots_sorted) != 4:
-        raise ValueError(f"Template JSON must define exactly 4 slots (got {len(slots_sorted)}).")
+        raise ValueError(
+            f"Template must define exactly 4 slots, got {len(slots_sorted)}."
+        )
 
     for slot, photo_path in zip(slots_sorted, photo_paths):
         photo_path = Path(photo_path)
 
-        # Resolve relative paths if needed
         if not photo_path.is_absolute():
             photo_path = BASE_DIR / photo_path
 
-        # Open + normalize
         with Image.open(photo_path) as im:
             img = im.convert("RGBA")
 
@@ -273,67 +331,73 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -
             img = img.rotate(slot.rotation, expand=True)
 
         fitted = cover_resize(img, slot.w, slot.h).convert("RGBA")
-
-        # Use alpha channel as mask
         mask = fitted.getchannel("A")
-
         base.paste(fitted, (slot.x, slot.y), mask)
 
     return base
 
-# because I use the perforated paper, duplicate the strips to be side by side to send to the printer
+
 def side_by_side(
     img: Image.Image,
     gap: int = 40,
-    bg: Tuple[int, int, int, int] = (255, 255, 255, 255)
+    bg: Tuple[int, int, int, int] = (255, 255, 255, 255),
 ) -> Image.Image:
     """
-    Duplicate the composed template image and place two copies side-by-side.
+    Duplicate a strip side by side for perforated photo paper printing.
     """
-    img = img.convert("RGBA")
     w, h = img.size
-
-    out = Image.new("RGBA", (w * 2 + gap, h), bg)
-    out.paste(img, (0, 0), img)
-    out.paste(img, (w + gap, 0), img)
-
-    return out
+    canvas = Image.new("RGBA", (w * 2 + gap, h), bg)
+    canvas.paste(img, (0, 0), img if img.mode == "RGBA" else None)
+    canvas.paste(img, (w + gap, 0), img if img.mode == "RGBA" else None)
+    return canvas
 
 class PhotoBoothUI:
     def __init__(self, root: tk.Tk):
+        # ---- window setup ----
         self.root = root
         self.root.title("PhotoBooth")
         self.root.attributes("-fullscreen", True)
         self.root.configure(bg="black")
         self.root.bind("<Escape>", lambda e: self.cleanup_and_exit())
+
+        # ---- templates ----
         self.templates = []
+
         # ---- state ----
         self.is_running_sequence = False
-        self.photo_index = 1  # 1..3
+        self.photo_index = 1
         self.total_photos = 4
 
-        # ---- template / printing state ----
-        self.captured_files = []          # stores the 4 photo file paths for current session
-        self.templates_dir = Path(__file__).resolve().parent / "PhotoboothTemplates"  # folder containing photo strip templates
+        # ---- capture / printing ----
+        self.captured_files = []  # stores captured image paths
+        self.templates_dir = Path(__file__).resolve().parent / "PhotoboothTemplates"
 
-        self.printer_name = None          # optional: set to printer queue name
-        self.last_composed_strip = None   # final composed strip image path
+        self.printer_name = None
+        self.last_composed_strip = None
 
-        # ---- assets (optional) ----
-        # If you want a welcome background image, set this path to your file.
-        # Example: "assets/welcome_bg.jpg"
-        self.welcome_bg_path = os.path.join(os.path.dirname(__file__), "stanfordwelcomebackground.jpg")
-        print("WELCOME BG PATH:", self.welcome_bg_path, "exists?", os.path.exists(self.welcome_bg_path))
-        self.tk_welcome_bg = None  # keep ref if loaded
+        # ---- assets ----
+        self.welcome_bg_path = os.path.join(
+            os.path.dirname(__file__),
+            "stanfordwelcomebackground.jpg"
+        )
 
-        # ---- fonts (use system fonts; you can change family names) ----
+        print(
+            "WELCOME BG PATH:",
+            self.welcome_bg_path,
+            "exists?",
+            os.path.exists(self.welcome_bg_path)
+        )
+
+        self.tk_welcome_bg = None
+
+        # ---- fonts ----
         self.font_title = ("Helvetica", 64, "bold")
         self.font_subtitle = ("Helvetica", 28, "normal")
         self.font_button = ("Helvetica", 28, "bold")
         self.font_small = ("Helvetica", 24, "bold")
         self.font_countdown = ("Helvetica", 160, "bold")
 
-        # ---- container ----
+        # ---- main container ----
         self.container = tk.Frame(self.root, bg="black")
         self.container.pack(expand=True, fill="both")
 
@@ -342,16 +406,16 @@ class PhotoBoothUI:
         self.build_capture_screen()
         self.build_template_picker_screen()
 
-        # start on welcome
+        # ---- start ----
         self.show_welcome_screen()
 
     def charge_with_wisepos(self, amount_cents: int) -> bool:
         """
-        Starts a card-present payment on the WisePOS and waits for completion.
-        Returns True only when the payment succeeds.
+        Run a Stripe Terminal (WisePOS) payment and wait for completion.
+        Returns True if payment succeeds.
         """
         try:
-            # 1) Create the PaymentIntent (it will usually start as requires_payment_method — that's normal)
+            # 1. Create PaymentIntent
             pi = stripe.PaymentIntent.create(
                 amount=amount_cents,
                 currency="usd",
@@ -359,42 +423,39 @@ class PhotoBoothUI:
                 description="Photobooth session"
             )
 
-            # 2) Tell the reader to process it
+            # 2. Send to reader
             stripe.terminal.Reader.process_payment_intent(
                 STRIPE_READER_ID,
                 payment_intent=pi.id
             )
 
-            # 3) Wait for the READER action to finish (this is the reliable signal)
+            # 3. Wait for reader action to complete
             start = time.time()
             while time.time() - start < 90:
                 reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
                 action = getattr(reader, "action", None)
 
-                # If no action yet, just keep waiting a moment
                 if not action:
                     time.sleep(0.5)
                     continue
 
                 status = getattr(action, "status", None)
 
-                # Action finished successfully → confirm PI status
                 if status == "succeeded":
                     pi = stripe.PaymentIntent.retrieve(pi.id)
                     return pi.status == "succeeded"
 
-                # Action ended unsuccessfully
                 if status in ("failed", "canceled"):
                     return False
 
-                # Otherwise it's still in progress
                 time.sleep(0.5)
 
-            # 4) Timeout: cancel on reader to reset terminal state
+            # 4. Timeout → cancel
             try:
                 stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
             except Exception:
                 pass
+
             return False
 
         except Exception as e:
@@ -402,11 +463,13 @@ class PhotoBoothUI:
                 stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
             except Exception:
                 pass
+
             messagebox.showerror("Payment error", str(e))
             return False
 
     def build_welcome_screen(self):
         self.welcome_frame = tk.Frame(self.container, bg="black")
+
         self.welcome_canvas = tk.Canvas(
             self.welcome_frame,
             bg="black",
@@ -415,7 +478,7 @@ class PhotoBoothUI:
         )
         self.welcome_canvas.pack(expand=True, fill="both")
 
-        # Optional: load a welcome background image (fills screen)
+        # Optional background image
         self.tk_welcome_bg = None
         if self.welcome_bg_path:
             try:
@@ -430,13 +493,14 @@ class PhotoBoothUI:
                 self.tk_welcome_bg = None
 
         self.welcome_bg_item = self.welcome_canvas.create_image(
-            0, 0,
+            0,
+            0,
             anchor="nw",
             image=self.tk_welcome_bg
         )
         self.welcome_canvas.tag_lower(self.welcome_bg_item)
 
-        # Title text
+        # Title
         self.welcome_text_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
             200,
@@ -456,216 +520,222 @@ class PhotoBoothUI:
             anchor="center"
         )
 
-        # --- Welcome tap-to-pay state ---
+        # Welcome/payment state
         self.session_paid = False
         self._payment_in_progress = False
         self._welcome_tap_enabled = True
 
         def _on_welcome_tap(event=None):
-            if self.session_paid or self._payment_in_progress:
+            if (
+                    not self._welcome_tap_enabled
+                    or self.session_paid
+                    or self._payment_in_progress
+            ):
                 return
 
             self._payment_in_progress = True
-            self.welcome_canvas.itemconfig(self.subtitle_item, text="Please pay on the terminal…")
+            self.welcome_canvas.itemconfig(
+                self.subtitle_item,
+                text="Please pay on the terminal…"
+            )
 
             def _run_payment():
                 ok = False
                 try:
-                    # Clear any stuck reader action (safe)
+                    # Clear any stuck reader action first
                     try:
                         stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
                     except Exception:
                         pass
 
                     ok = self.charge_with_wisepos(amount_cents=50)
+
                 finally:
                     def _finish():
                         self._payment_in_progress = False
+
                         if ok:
                             self.session_paid = True
                             self._welcome_tap_enabled = False
-                            self.welcome_canvas.itemconfig(self.subtitle_item, text="Paid ✅ Starting…")
+                            self.welcome_canvas.itemconfig(
+                                self.subtitle_item,
+                                text="Paid ✅ Starting…"
+                            )
                             self.root.after(100, self.start_sequence)
                         else:
-                            self.welcome_canvas.itemconfig(self.subtitle_item, text="Payment failed. Tap to try again.")
+                            self.welcome_canvas.itemconfig(
+                                self.subtitle_item,
+                                text="Payment failed. Tap to try again."
+                            )
 
                     self.root.after(0, _finish)
 
             import threading
             threading.Thread(target=_run_payment, daemon=True).start()
 
+        self.welcome_canvas.bind("<Button-1>", _on_welcome_tap)
+
         def _tap_wrapper(event=None):
             if not self._welcome_tap_enabled:
                 return
             _on_welcome_tap(event)
 
-        # Bind tap/click on the entire welcome screen
+        # Bind tap/click across the whole welcome screen
         self.welcome_canvas.bind("<Button-1>", _tap_wrapper)
         self.welcome_canvas.tag_bind(self.welcome_bg_item, "<Button-1>", _tap_wrapper)
         self.welcome_canvas.tag_bind(self.welcome_text_item, "<Button-1>", _tap_wrapper)
         self.welcome_canvas.tag_bind(self.subtitle_item, "<Button-1>", _tap_wrapper)
 
-    def build_capture_screen(self):
-        self.capture_frame = tk.Frame(self.container, bg="black")
-        self.capture_canvas = tk.Canvas(
-            self.capture_frame,
-            bg="black",
-            highlightthickness=0,
-            borderwidth=0
-        )
-        self.capture_canvas.pack(expand=True, fill="both")
+        def build_capture_screen(self):
+            self.capture_frame = tk.Frame(self.container, bg="black")
 
-        # Background preview image (updated each frame)
-        self.bg_image_item = self.capture_canvas.create_image(
-            0, 0,
-            anchor="nw",
-            image=None
-        )
-        self.capture_canvas.tag_lower(self.bg_image_item)
-
-        # Splash: "3 photos, get ready!"
-        self.splash_item = self.capture_canvas.create_text(
-            self.root.winfo_screenwidth() // 2,
-            self.root.winfo_screenheight() // 2,
-            text="4 photos, get ready!",
-            fill="white",
-            font=self.font_title,
-            anchor="center",
-            state="hidden"
-        )
-
-        # Top-right "Photo X"
-        self.photo_item = self.capture_canvas.create_text(
-            self.root.winfo_screenwidth() - 40,
-            30,
-            text="Photo 1",
-            fill="white",
-            font=self.font_small,
-            anchor="ne",
-            state="hidden"
-        )
-
-        # Countdown in center
-        self.countdown_item = self.capture_canvas.create_text(
-            self.root.winfo_screenwidth() // 2,
-            int(self.root.winfo_screenheight() * 0.52),
-            text="",
-            fill="white",
-            font=self.font_countdown,
-            anchor="center",
-            state="hidden"
-        )
-
-    # -------------------------
-    # Screen navigation
-    # -------------------------
-    def clear_screens(self):
-        self.stop_welcome_pulse()
-        for child in self.container.winfo_children():
-            child.pack_forget()
-
-    def show_welcome_screen(self):
-        self.clear_screens()
-        self.welcome_frame.pack(expand=True, fill="both")
-
-        # Reset run/session flags
-        self.is_running_sequence = False
-
-        # Reset payment / tap state for a NEW customer
-        self.session_paid = False
-        self._payment_in_progress = False
-        self._welcome_tap_enabled = True
-
-        # Reset subtitle text
-        try:
-            self.welcome_canvas.itemconfig(
-                self.subtitle_item,
-                text="Tap to pay & start"
+            self.capture_canvas = tk.Canvas(
+                self.capture_frame,
+                bg="black",
+                highlightthickness=0,
+                borderwidth=0
             )
-        except Exception:
-            pass
+            self.capture_canvas.pack(expand=True, fill="both")
 
-        # Restart the subtle welcome animation (if you added it)
-        try:
-            self.start_welcome_pulse()
-        except Exception:
-            pass
+            # Splash: "4 photos, get ready!"
+            self.splash_item = self.capture_canvas.create_text(
+                self.root.winfo_screenwidth() // 2,
+                self.root.winfo_screenheight() // 2,
+                text="4 photos, get ready!",
+                fill="white",
+                font=self.font_title,
+                anchor="center",
+                state="hidden"
+            )
+
+            # Top-right "Photo X"
+            self.photo_item = self.capture_canvas.create_text(
+                self.root.winfo_screenwidth() - 40,
+                30,
+                text="Photo 1",
+                fill="white",
+                font=self.font_small,
+                anchor="ne",
+                state="hidden"
+            )
+
+            # Big countdown number
+            self.countdown_item = self.capture_canvas.create_text(
+                self.root.winfo_screenwidth() // 2,
+                int(self.root.winfo_screenheight() * 0.52),
+                text="",
+                fill="white",
+                font=self.font_countdown,
+                anchor="center",
+                state="hidden"
+            )
+
+        # -------------------------
+        # Screen navigation
+        # -------------------------
+        def clear_screens(self):
+            self.stop_welcome_pulse()
+            for child in self.container.winfo_children():
+                child.pack_forget()
+
+        def show_welcome_screen(self):
+            self.clear_screens()
+            self.welcome_frame.pack(expand=True, fill="both")
+
+            # Reset session/run state
+            self.is_running_sequence = False
+            self.session_paid = False
+            self._payment_in_progress = False
+            self._welcome_tap_enabled = True
+
+            # Reset welcome subtitle
+            try:
+                self.welcome_canvas.itemconfig(
+                    self.subtitle_item,
+                    text="Tap to pay & start"
+                )
+            except Exception:
+                pass
+
+            # Restart welcome animation if available
+            try:
+                self.start_welcome_pulse()
+            except Exception:
+                pass
 
     def _get_font_with_size(self, base_font, size: int):
         """
-        Returns a font tuple with the same family/weight as base_font but a new size.
-        Works for tuple-based fonts (most common in Tkinter apps).
+        Return a font tuple with the same family/style as base_font
+        but using a different size.
         """
         if isinstance(base_font, tuple) and len(base_font) >= 2:
             family = base_font[0]
-            rest = list(base_font[2:])  # weight/slant/etc
+            rest = list(base_font[2:])
             return (family, size, *rest)
-        return base_font  # fallback (won't resize if it's not a tuple)
+        return base_font
 
     def start_welcome_pulse(self):
-        """Start the pulsing animation on the welcome subtitle."""
-        self.stop_welcome_pulse()  # ensure no duplicate loops
+        """Start a subtle pulsing animation on the welcome subtitle."""
+        self.stop_welcome_pulse()
         self._welcome_pulse_on = True
 
-        # Base Y position (so we can bob around it)
         self._welcome_subtitle_base_y = getattr(self, "_welcome_subtitle_base_y", None)
         if self._welcome_subtitle_base_y is None:
-            # capture the current y as the base
             coords = self.welcome_canvas.coords(self.subtitle_item)
             if coords and len(coords) >= 2:
                 self._welcome_subtitle_base_y = coords[1]
             else:
-                self._welcome_subtitle_base_y = 300  # fallback
+                self._welcome_subtitle_base_y = 300
 
-        # Pick a base size from your font_subtitle if possible
         base_size = 0
         if isinstance(self.font_subtitle, tuple) and len(self.font_subtitle) >= 2:
             base_size = int(self.font_subtitle[1])
         if base_size <= 0:
-            base_size = 32  # fallback default
+            base_size = 32
 
-        self._welcome_pulse_state = 0  # 0..3 cycle
+        self._welcome_pulse_state = 0
 
         def _tick():
             if not getattr(self, "_welcome_pulse_on", False):
                 return
 
-            # Cycle: bright -> dim -> bright -> dim
             cycle = self._welcome_pulse_state % 4
 
-            # Subtle fade (white <-> light gray)
             fill = "white" if cycle in (0, 2) else "#d9d9d9"
 
-            # Subtle bob (0px -> -3px -> 0px -> +3px)
             bob = 0
             if cycle == 1:
                 bob = -3
             elif cycle == 3:
                 bob = 3
 
-            # Subtle size pulse (base -> base+1 -> base -> base+1)
             size = base_size if cycle in (0, 2) else (base_size + 1)
             font = self._get_font_with_size(self.font_subtitle, size)
 
             try:
-                # Update text appearance
-                self.welcome_canvas.itemconfig(self.subtitle_item, fill=fill, font=font)
+                self.welcome_canvas.itemconfig(
+                    self.subtitle_item,
+                    fill=fill,
+                    font=font
+                )
 
-                # Update position (keep x the same, bob y around base)
                 x, _ = self.welcome_canvas.coords(self.subtitle_item)
-                self.welcome_canvas.coords(self.subtitle_item, x, self._welcome_subtitle_base_y + bob)
+                self.welcome_canvas.coords(
+                    self.subtitle_item,
+                    x,
+                    self._welcome_subtitle_base_y + bob
+                )
             except Exception:
-                # If the item doesn't exist yet, just stop gracefully
                 self.stop_welcome_pulse()
                 return
 
             self._welcome_pulse_state += 1
-            self._welcome_pulse_after_id = self.root.after(450, _tick)  # adjust speed here
+            self._welcome_pulse_after_id = self.root.after(450, _tick)
 
         self._welcome_pulse_after_id = self.root.after(0, _tick)
 
     def stop_welcome_pulse(self):
-        """Stop the pulsing animation."""
+        """Stop the welcome subtitle pulse animation."""
         self._welcome_pulse_on = False
         after_id = getattr(self, "_welcome_pulse_after_id", None)
         if after_id:
@@ -682,59 +752,40 @@ class PhotoBoothUI:
     def start_sequence(self):
         """
         Entry point after successful payment.
-        This function must only run ONCE per paid session.
+        Must only run once per paid session.
         """
-
-        # Must have a successful payment
         if not getattr(self, "session_paid", False):
             return
 
-        # Must not already be running
         if getattr(self, "is_running_sequence", False):
             return
 
-        # Lock the sequence so it cannot start twice
         self.is_running_sequence = True
 
-        # ✅ TELEMETRY: session officially starts here (after payment, before capture begins)
         try:
             telemetry.session_started()
         except Exception:
             pass
 
         try:
-            # OPTIONAL: stop welcome animations if you have them
             try:
                 self.stop_welcome_pulse()
             except Exception:
                 pass
 
-            # Clear the welcome screen
-            self.clear_screens()
+            self.show_capture_screen()
 
-            self.capture_frame.pack(expand=True, fill="both")
-
-            # Initialize capture state
             self.photo_index = 1
-            self.total_photos = getattr(self, "total_photos", 4)  # default to 4 if unset
+            self.total_photos = getattr(self, "total_photos", 4)
             self.captured_files = []
 
-            # Show splash text
             self.set_splash(True)
 
-            # Small pause, then begin photo sequence
+            # After short intro delay, begin first photo
             self.root.after(1200, self.start_next_photo)
 
         except Exception as e:
             print("[ERROR] start_sequence failed:", e)
-            self.is_running_sequence = False
-            self.session_paid = False
-            self.show_welcome_screen()
-
-        except Exception as e:
-            print("[ERROR] start_sequence failed:", e)
-
-            # If something goes wrong, reset safely to welcome screen
             self.is_running_sequence = False
             self.session_paid = False
             self.show_welcome_screen()
@@ -746,9 +797,17 @@ class PhotoBoothUI:
 
         self.set_splash(False)
 
-        # Show photo label and countdown
-        self.capture_canvas.itemconfig(self.photo_item, text=f"Photo {self.photo_index}", state="normal")
-        self.capture_canvas.itemconfig(self.countdown_item, text="", state="normal")
+        # Show current photo number and prepare countdown
+        self.capture_canvas.itemconfig(
+            self.photo_item,
+            text=f"Photo {self.photo_index}",
+            state="normal"
+        )
+        self.capture_canvas.itemconfig(
+            self.countdown_item,
+            text="",
+            state="normal"
+        )
 
         self.run_countdown(3)
 
@@ -762,75 +821,62 @@ class PhotoBoothUI:
             self.root.after(600, self.start_next_photo)
             return
 
-        self.capture_canvas.itemconfig(self.countdown_item, text=str(n), state="normal")
+        self.capture_canvas.itemconfig(
+            self.countdown_item,
+            text=str(n),
+            state="normal"
+        )
         self.root.after(1000, lambda: self.run_countdown(n - 1))
 
     def finish_sequence(self):
         self.is_running_sequence = False
-        self.photo_index = 1  # reset defensively
+        self.photo_index = 1
 
-        # Hide all capture overlays
+        # Hide capture overlays
         self.capture_canvas.itemconfig(self.photo_item, state="hidden")
         self.capture_canvas.itemconfig(self.countdown_item, state="hidden")
         self.capture_canvas.itemconfig(self.splash_item, state="hidden")
 
-        # Small pause before moving to template picker (UX polish)
+        # Small pause before template picker
         self.root.after(400, self.show_template_picker_screen)
 
     def set_splash(self, visible: bool):
-        self.capture_canvas.itemconfig(self.splash_item, state=("normal" if visible else "hidden"))
+        self.capture_canvas.itemconfig(
+            self.splash_item,
+            state=("normal" if visible else "hidden")
+        )
         if visible:
             self.capture_canvas.itemconfig(self.photo_item, state="hidden")
             self.capture_canvas.itemconfig(self.countdown_item, state="hidden")
 
     # -------------------------
-    # Capture (placeholder)
+    # Capture with gphoto2
     # -------------------------
     def capture_photo(self):
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"photo_{self.photo_index}_{ts}.jpg"
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            output_path = INCOMING_DIR / f"photo_{self.photo_index}_{ts}.jpg"
 
-        # Always save photos next to final.py (cross-platform safe)
-        base_dir = os.path.dirname(__file__)
-        filepath = os.path.join(base_dir, filename)
+            # Optional flash effect
+            self.capture_canvas.configure(bg="white")
+            self.root.update()
+            time.sleep(0.1)
+            self.capture_canvas.configure(bg="black")
+            self.root.update()
 
-        if HAS_PREVIEW and self.latest_frame_bgr is not None:
-            ok = cv2.imwrite(filepath, self.latest_frame_bgr)
-            if ok:
-                self.captured_files.append(filepath)  # ✅ FULL PATH
-                print(f"[OK] Saved {filepath}")
-            else:
-                print(f"[WARN] Could not save {filepath}")
-        else:
-            # Simulation mode (no camera)
-            self.captured_files.append(filepath)  # still full path
-            print(f"[SIM] Captured {filepath} (no camera frame available)")
+            saved_path = capture_photo_gphoto(output_path)
 
-    # -------------------------
-    # Camera preview loop
-    # -------------------------
-    def update_camera_frame(self):
-        if HAS_PREVIEW and self.cap is not None:
-            ret, frame = self.cap.read()
-            if ret:
-                self.latest_frame_bgr = frame
+            self.captured_files.append(str(saved_path))
+            print(f"[OK] Captured {saved_path}")
 
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        except Exception as e:
+            print(f"[CAPTURE ERROR] Photo {self.photo_index} failed: {e}")
+            messagebox.showerror("Camera Error", f"Could not capture photo {self.photo_index}.\n\n{e}")
 
-                w = self.root.winfo_width()
-                h = self.root.winfo_height()
-                if w > 1 and h > 1:
-                    frame_rgb = cv2.resize(frame_rgb, (w, h), interpolation=cv2.INTER_AREA)
-
-                img = Image.fromarray(frame_rgb)
-                self.tk_preview_img = ImageTk.PhotoImage(img)  # keep reference
-
-                # Put preview on capture canvas (only matters when capture screen is visible)
-                self.capture_canvas.itemconfig(self.bg_image_item, image=self.tk_preview_img)
-                self.capture_canvas.tag_lower(self.bg_image_item)
-
-        # ~30 FPS
-        self.root.after(33, self.update_camera_frame)
+            # Abort this session and return to welcome
+            self.is_running_sequence = False
+            self.session_paid = False
+            self.show_welcome_screen()
 
     # -------------------------
     # Cleanup
@@ -838,12 +884,6 @@ class PhotoBoothUI:
     def build_template_picker_screen(self):
         self.template_frame = tk.Frame(self.container, bg="black")
 
-        self.template_canvas = tk.Canvas(
-            self.template_frame,
-            bg="black",
-            highlightthickness=0,
-            borderwidth=0
-        )
         # Container for canvas + scrollbar
         self.template_container = tk.Frame(self.template_frame, bg="black")
         self.template_container.pack(expand=True, fill="both")
@@ -875,7 +915,7 @@ class PhotoBoothUI:
             anchor="center"
         )
 
-        # A status/message text (used for "Printing your photos...", "Done", etc.)
+        # Status / message text
         self.template_status_item = self.template_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
             self.root.winfo_screenheight() // 2,
@@ -886,38 +926,46 @@ class PhotoBoothUI:
             state="hidden"
         )
 
-        # Preview of composed strip (hidden until a template is selected)
+        # Preview of composed strip
         self.template_preview_item = self.template_canvas.create_image(
             self.root.winfo_screenwidth() // 2,
             int(self.root.winfo_screenheight() * 0.55),
             anchor="center",
-            image=None
+            image=None,
+            state="hidden"
         )
 
-        # Keep references to thumbnails so they don't get garbage-collected
+        # Keep refs so Tk does not garbage collect images
         self._template_thumb_refs = []
         self._template_item_to_path = {}
-        self._template_grid_item_ids = []  # canvas item ids for template thumbnails
+        self._template_grid_item_ids = []
 
     def _enable_touch_scroll(self):
-        # Drag the canvas content with finger/mouse
         self.template_canvas.bind("<ButtonPress-1>", self._start_touch_scroll)
         self.template_canvas.bind("<B1-Motion>", self._do_touch_scroll)
 
     def _start_touch_scroll(self, event):
-        # Remember the starting point
         self.template_canvas.scan_mark(event.x, event.y)
 
     def _do_touch_scroll(self, event):
-        # Drag to scroll
         self.template_canvas.scan_dragto(event.x, event.y, gain=1)
+
     def show_template_picker_screen(self):
         self.clear_screens()
         self.template_frame.pack(expand=True, fill="both")
 
-        # Hide status + preview initially
-        self.template_canvas.itemconfig(self.template_status_item, state="hidden", text="")
-        self.template_canvas.itemconfig(self.template_preview_item, image=None, state="hidden")
+        # Reset status and preview
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            state="hidden",
+            text=""
+        )
+        self.template_canvas.itemconfig(
+            self.template_preview_item,
+            image=None,
+            state="hidden"
+        )
+
         self._composed_preview_ref = None
         self.last_composed_strip = None
 
@@ -925,7 +973,7 @@ class PhotoBoothUI:
         self._enable_touch_scroll()
 
     def render_template_grid(self):
-        # --- Clear old thumbnail canvas items ---
+        # Clear old thumbnail canvas items
         for item_id in self._template_grid_item_ids:
             try:
                 self.template_canvas.delete(item_id)
@@ -935,12 +983,16 @@ class PhotoBoothUI:
         self._template_grid_item_ids.clear()
         self._template_thumb_refs.clear()
 
-        # Hide/clear any prior status message
-        self.template_canvas.itemconfig(self.template_status_item, state="hidden", text="")
+        # Hide/clear prior status
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            state="hidden",
+            text=""
+        )
 
-        # --- Load templates (expects PNG+JSON pairs) ---
+        # Load templates (PNG + JSON pairs)
         try:
-            self.templates = load_templates(self.templates_dir)  # List[TemplateDef]
+            self.templates = load_templates(self.templates_dir)
             print("self.templates type:", type(self.templates))
             print(
                 "TEMPLATES LOADED IN GRID:",
@@ -975,7 +1027,7 @@ class PhotoBoothUI:
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
             return
 
-        # --- Grid layout ---
+        # Grid layout
         screen_w = self.root.winfo_screenwidth()
         start_y = 140
         pad = 30
@@ -984,7 +1036,7 @@ class PhotoBoothUI:
         thumb_w = int((screen_w - pad * (cols + 1)) / cols)
         thumb_h = int(thumb_w * 1.2)
 
-        # --- Create thumbnails ---
+        # Create thumbnails
         for idx, tdef in enumerate(self.templates):
             col = idx % cols
             row = idx // cols
@@ -1003,20 +1055,19 @@ class PhotoBoothUI:
             self._template_thumb_refs.append(tk_img)
 
             item_id = self.template_canvas.create_image(
-                x, y,
+                x,
+                y,
                 image=tk_img,
                 anchor="center"
             )
             self._template_grid_item_ids.append(item_id)
 
-            # Click -> select this TemplateDef
             self.template_canvas.tag_bind(
                 item_id,
                 "<Button-1>",
                 lambda e, td=tdef: self.on_template_selected(td)
             )
 
-        # --- Update scroll region so user can scroll through ALL templates ---
         self.template_canvas.update_idletasks()
         bbox = self.template_canvas.bbox("all")
         if bbox:
@@ -1024,13 +1075,10 @@ class PhotoBoothUI:
         else:
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
 
-        self.template_canvas.update_idletasks()
-        bbox = self.template_canvas.bbox("all")
-        if bbox:
-            self.template_canvas.configure(scrollregion=bbox)
     def on_template_selected(self, tdef: TemplateDef):
-        # Guard: ensure we have 4 photos (or your total_photos)
         needed = getattr(self, "total_photos", 4)
+
+        # Guard: ensure we have all captured photos
         if len(self.captured_files) < needed:
             self.template_canvas.itemconfig(
                 self.template_status_item,
@@ -1040,22 +1088,58 @@ class PhotoBoothUI:
             self.template_canvas.tag_raise(self.template_status_item)
             return
 
-        # ✅ TELEMETRY: template chosen (daily + lifetime)
+        # Telemetry: template chosen
         try:
-            # Use a stable identifier (prefer an explicit id/name; fallback to file stem)
-            template_id = getattr(tdef, "template_id", None) or getattr(tdef, "name", None) or tdef.png_path.stem
+            template_id = (
+                    getattr(tdef, "template_id", None)
+                    or getattr(tdef, "name", None)
+                    or Path(tdef.png_path).stem
+            )
             telemetry.template_chosen(str(template_id))
         except Exception:
             pass
 
-        # Hide template thumbnails so only preview remains
+        # Hide template grid and title so only status/preview remain
         self.hide_template_grid()
         self.template_canvas.itemconfig(self.template_title_item, state="hidden")
-        self.template_canvas.itemconfig(self.template_status_item, state="hidden", text="")
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            state="normal",
+            text="Composing your strip..."
+        )
+        self.template_canvas.tag_raise(self.template_status_item)
+        self.root.update()
 
-        # Compose using JSON-defined slots
         try:
-            composed_img = compose(tdef.png_path, tdef.slots, self.captured_files[:needed])
+            # Compose final strip using the REAL camera photos
+            composed_img = compose(
+                tdef.png_path,
+                tdef.slots,
+                self.captured_files[:needed]
+            )
+
+            # Create doubled print-ready strip
+            double_img = side_by_side(composed_img)
+
+            # Save doubled strip
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_name = f"strip_double_{ts}.png"
+            out_path = Path(__file__).resolve().parent / out_name
+
+            double_img.convert("RGB").save(out_path, quality=95)
+            self.last_composed_strip = str(out_path)
+
+            print("[OK] Saved doubled strip:", out_path)
+
+            # IMPORTANT: now that the strip is successfully composed/saved,
+            # delete the original camera captures for privacy/cleanup.
+            try:
+                delete_files([Path(p) for p in self.captured_files[:needed]])
+                self.captured_files = []
+                print("[CLEANUP] Deleted original captured camera photos.")
+            except Exception as cleanup_error:
+                print("[WARN] Could not delete original captured files:", cleanup_error)
+
         except Exception as e:
             self.template_canvas.itemconfig(
                 self.template_status_item,
@@ -1065,30 +1149,12 @@ class PhotoBoothUI:
             self.template_canvas.tag_raise(self.template_status_item)
             return
 
-        # Save composed strip to a file (so we can print it)
-        base_dir = os.path.dirname(__file__)
-        out_name = f"strip_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        # --- Create doubled strip ---
-        double_img = side_by_side(composed_img)
-
-        # --- Save doubled strip (print-ready) ---
-        base_dir = os.path.dirname(__file__)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_name = f"strip_double_{ts}.png"
-        out_path = os.path.join(base_dir, out_name)
-
-        double_img.convert("RGB").save(out_path, quality=95)
-        self.last_composed_strip = out_path
-
-        print("[OK] Saved doubled strip:", out_path)
-
-        # --- 3. Send to printer (Windows PC) ---
-        try:
-            print_image_windows(self.last_composed_strip, self.printer_name)
-        except Exception as e:
-            print("[WARN] Printing failed:", e)
-
-        self.template_canvas.itemconfig(self.template_preview_item, state="hidden")
+        # Hide preview image item unless you later decide to show one
+        self.template_canvas.itemconfig(
+            self.template_preview_item,
+            image=None,
+            state="hidden"
+        )
 
         # Printing overlay
         self.template_canvas.itemconfig(
@@ -1098,8 +1164,8 @@ class PhotoBoothUI:
         )
         self.template_canvas.tag_raise(self.template_status_item)
 
-        # Print then return
-        self.root.after(5000, lambda: self._print_then_done(out_path))
+        # Print, then continue flow
+        self.root.after(500, lambda: self._print_then_done(str(out_path)))
 
     def show_printing_message(self):
         self.template_canvas.itemconfig(
@@ -1110,10 +1176,13 @@ class PhotoBoothUI:
         self.template_canvas.tag_raise(self.template_status_item)
 
     def _print_then_done(self, composed_path: str):
-        # Try to print
+        """
+        Print the composed strip, then clean up all temporary files and
+        return to the welcome screen.
+        """
         ok, details = self.print_file(composed_path)
 
-        # ✅ TELEMETRY: count prints (lifetime + daily) + paper roll warnings/reset
+        # Telemetry
         try:
             telemetry.print_result(ok=ok, details=details)
         except Exception:
@@ -1128,37 +1197,24 @@ class PhotoBoothUI:
             self.root.after(4000, self.cleanup_session_files_and_return)
             return
 
-        self.template_canvas.itemconfig(self.template_status_item, state="normal", text="Done!")
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            state="normal",
+            text="Done!"
+        )
         self.root.after(2000, self.cleanup_session_files_and_return)
 
     def print_file(self, file_path: str) -> tuple[bool, str]:
         """
-        macOS print via `lp`.
-        If you set self.printer_name, it will target that printer.
-
+        Print a file using the Windows image-print helper.
         Returns:
             (ok, details)
-            - ok: True if the job was queued successfully
-            - details: stderr/stdout or exception string (trimmed), useful for telemetry
         """
         try:
-            cmd = ["lp"]
-            if self.printer_name:
-                cmd += ["-d", self.printer_name]
-            cmd.append(file_path)
+            with Image.open(file_path) as img:
+                print_pil_image(img, self.printer_name)
 
-            # This queues the job; it does not guarantee paper came out.
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-
-            details = (result.stdout or "").strip()
-            return True, details[:400]  # keep it short
-
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or "").strip() if hasattr(e, "stderr") else ""
-            stdout = (e.stdout or "").strip() if hasattr(e, "stdout") else ""
-            details = (stderr or stdout or str(e)).strip()
-            print(f"[PRINT ERROR] {details}")
-            return False, details[:400]
+            return True, "Printed successfully"
 
         except Exception as e:
             details = str(e).strip()
@@ -1166,57 +1222,58 @@ class PhotoBoothUI:
             return False, details[:400]
 
     def cleanup_session_files_and_return(self):
-        base_dir = os.path.dirname(__file__)
-
-        def _abs(p: str) -> str:
-            if not p:
-                return p
-            p = str(p)
-            return p if os.path.isabs(p) else os.path.join(base_dir, p)
-
+        """
+        Delete all temporary session files:
+        - original captured camera photos
+        - composed strip file
+        Then reset booth state and return to welcome screen.
+        """
         deleted = 0
 
-        # --- Delete captured originals ---
+        # Delete captured original photos from computer
         for f in list(getattr(self, "captured_files", []) or []):
             try:
-                f_abs = _abs(f)
-                print("[CLEANUP] trying delete:", f_abs)
+                p = Path(f)
+                print("[CLEANUP] trying delete captured photo:", p)
 
-                if f_abs and os.path.exists(f_abs):
-                    os.remove(f_abs)
+                if p.exists():
+                    p.unlink()
                     deleted += 1
-                    print("[CLEANUP] deleted:", f_abs)
+                    print("[CLEANUP] deleted captured photo:", p)
                 else:
-                    print("[CLEANUP] not found:", f_abs)
+                    print("[CLEANUP] captured photo not found:", p)
 
             except Exception as e:
-                print(f"[WARN] Could not delete {f}: {e}")
+                print(f"[WARN] Could not delete captured photo {f}: {e}")
 
-        # --- Optional: delete the composed strip too ---
+        # Delete composed strip from computer
         last_strip = getattr(self, "last_composed_strip", None)
         if last_strip:
             try:
-                strip_abs = _abs(last_strip)
-                print("[CLEANUP] trying delete strip:", strip_abs)
+                p = Path(last_strip)
+                print("[CLEANUP] trying delete composed strip:", p)
 
-                if os.path.exists(strip_abs):
-                    os.remove(strip_abs)
+                if p.exists():
+                    p.unlink()
                     deleted += 1
-                    print("[CLEANUP] deleted strip:", strip_abs)
+                    print("[CLEANUP] deleted composed strip:", p)
                 else:
-                    print("[CLEANUP] strip not found:", strip_abs)
+                    print("[CLEANUP] composed strip not found:", p)
 
             except Exception as e:
-                print(f"[WARN] Could not delete composed strip: {e}")
+                print(f"[WARN] Could not delete composed strip {last_strip}: {e}")
 
-        # --- Reset session state ---
+        # Reset session state
         self.captured_files = []
         self.last_composed_strip = None
         self._payment_in_progress = False
+        self.session_paid = False
+        self.is_running_sequence = False
+        self.photo_index = 1
 
         print(f"[CLEANUP] done. deleted {deleted} files.")
 
-        # --- Return to welcome screen ---
+        # Return to welcome screen
         self.show_welcome_screen()
 
     def hide_template_grid(self):
@@ -1229,50 +1286,55 @@ class PhotoBoothUI:
 
     def cleanup_and_exit(self):
         try:
-            if HAS_PREVIEW and self.cap is not None:
-                self.cap.release()
+            for f in list(getattr(self, "captured_files", []) or []):
+                try:
+                    Path(f).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            last_strip = getattr(self, "last_composed_strip", None)
+            if last_strip:
+                try:
+                    Path(last_strip).unlink(missing_ok=True)
+                except Exception:
+                    pass
         finally:
             self.root.destroy()
 
-def main():
-    templates = load_templates(TEMPLATES_DIR)
+    def main():
+        root = tk.Tk()
 
-    root = tk.Tk()
+        # Heartbeat every 10 minutes
+        def schedule_heartbeat():
+            try:
+                telemetry.heartbeat(uptime_start=START_TIME)
+            except Exception:
+                pass
+            root.after(10 * 60 * 1000, schedule_heartbeat)
 
-    # Heartbeat every 10 minutes
-    def schedule_heartbeat():
-        try:
-            telemetry.heartbeat(uptime_start=START_TIME)
-        except Exception:
-            pass
-        root.after(10 * 60 * 1000, schedule_heartbeat)
+        schedule_heartbeat()
 
-    schedule_heartbeat()
+        # Build UI
+        PhotoBoothUI(root)
 
-    # Build UI (pass templates if your UI needs them)
-    PhotoBoothUI(root)  # or PhotoBoothUI(root, templates)
+        # Window close handler
+        def on_close():
+            try:
+                telemetry.log_event("booth_stopped")
+            except Exception:
+                pass
 
-    # Window close handler
-    def on_close():
-        try:
-            telemetry.log_event("booth_stopped")
-        except Exception:
-            pass
+            try:
+                telemetry.send_telegram(f"🛑 Booth stopped ({telemetry.booth_id})")
+            except Exception:
+                pass
 
-        try:
-            telemetry.send_telegram(f"🛑 Booth stopped ({telemetry.booth_id})")
-        except Exception:
-            pass
+            root.destroy()
 
-        root.destroy()
+        root.protocol("WM_DELETE_WINDOW", on_close)
 
-    root.protocol("WM_DELETE_WINDOW", on_close)
+        # Keep the app running
+        root.mainloop()
 
-    # ✅ KEEP THE APP RUNNING
-    root.mainloop()
-
-
-
-
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()
