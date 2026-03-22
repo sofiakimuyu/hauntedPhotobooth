@@ -389,7 +389,7 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -
 
 def side_by_side(
     img: Image.Image,
-    gap: int = 40,
+    gap: int = 0,
     bg: Tuple[int, int, int, int] = (255, 255, 255, 255),
 ) -> Image.Image:
     """
@@ -907,17 +907,18 @@ class PhotoBoothUI:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             output_path = INCOMING_DIR / f"photo_{self.photo_index}_{ts}.jpg"
 
-            # Flash effect
+            # Give camera a moment to settle/focus before triggering
+            time.sleep(0.8)
+
+            # Flash effect immediately before capture
             self.capture_canvas.configure(bg="white")
             self.root.update()
-            time.sleep(0.1)
-            self.capture_canvas.configure(bg="black")
-            self.root.update()
-
-            # Give camera a moment before triggering
-            time.sleep(1.0)
+            time.sleep(0.08)
 
             saved_path = capture_photo_gphoto(output_path)
+
+            self.capture_canvas.configure(bg="black")
+            self.root.update()
 
             self.captured_files.append(str(saved_path))
             print(f"[OK] Captured {saved_path}")
@@ -1190,20 +1191,6 @@ class PhotoBoothUI:
             self.last_composed_strip = str(out_path)
 
             print("[OK] Saved doubled strip:", out_path)
-
-            # Optional preview on screen so you can confirm composition is not blank
-            try:
-                preview_img = rgb_img.copy()
-                preview_img.thumbnail((700, 1200), Image.LANCZOS)
-                self._composed_preview_ref = ImageTk.PhotoImage(preview_img)
-
-                self.template_canvas.itemconfig(
-                    self.template_preview_item,
-                    image=self._composed_preview_ref,
-                    state="normal"
-                )
-            except Exception as preview_error:
-                print("[WARN] Could not show composed preview:", preview_error)
 
             # Delete original camera captures from computer after strip is saved
             try:
