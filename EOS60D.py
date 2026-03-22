@@ -586,82 +586,82 @@ class PhotoBoothUI:
         self.welcome_canvas.tag_bind(self.welcome_text_item, "<Button-1>", _tap_wrapper)
         self.welcome_canvas.tag_bind(self.subtitle_item, "<Button-1>", _tap_wrapper)
 
-        def build_capture_screen(self):
-            self.capture_frame = tk.Frame(self.container, bg="black")
+    def build_capture_screen(self):
+        self.capture_frame = tk.Frame(self.container, bg="black")
 
-            self.capture_canvas = tk.Canvas(
-                self.capture_frame,
-                bg="black",
-                highlightthickness=0,
-                borderwidth=0
+        self.capture_canvas = tk.Canvas(
+            self.capture_frame,
+            bg="black",
+            highlightthickness=0,
+            borderwidth=0
+        )
+        self.capture_canvas.pack(expand=True, fill="both")
+
+        # Splash: "4 photos, get ready!"
+        self.splash_item = self.capture_canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            self.root.winfo_screenheight() // 2,
+            text="4 photos, get ready!",
+            fill="white",
+            font=self.font_title,
+            anchor="center",
+            state="hidden"
+        )
+
+        # Top-right "Photo X"
+        self.photo_item = self.capture_canvas.create_text(
+            self.root.winfo_screenwidth() - 40,
+            30,
+            text="Photo 1",
+            fill="white",
+            font=self.font_small,
+            anchor="ne",
+            state="hidden"
+        )
+
+        # Big countdown number
+        self.countdown_item = self.capture_canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            int(self.root.winfo_screenheight() * 0.52),
+            text="",
+            fill="white",
+            font=self.font_countdown,
+            anchor="center",
+            state="hidden"
+        )
+
+    # -------------------------
+    # Screen navigation
+    # -------------------------
+    def clear_screens(self):
+        self.stop_welcome_pulse()
+        for child in self.container.winfo_children():
+            child.pack_forget()
+
+    def show_welcome_screen(self):
+        self.clear_screens()
+        self.welcome_frame.pack(expand=True, fill="both")
+
+        # Reset session/run state
+        self.is_running_sequence = False
+        self.session_paid = False
+        self._payment_in_progress = False
+        self._welcome_tap_enabled = True
+
+        # Reset welcome subtitle
+        try:
+            self.welcome_canvas.itemconfig(
+                self.subtitle_item,
+                text="Tap to pay & start"
             )
-            self.capture_canvas.pack(expand=True, fill="both")
+        except Exception:
+            pass
 
-            # Splash: "4 photos, get ready!"
-            self.splash_item = self.capture_canvas.create_text(
-                self.root.winfo_screenwidth() // 2,
-                self.root.winfo_screenheight() // 2,
-                text="4 photos, get ready!",
-                fill="white",
-                font=self.font_title,
-                anchor="center",
-                state="hidden"
-            )
-
-            # Top-right "Photo X"
-            self.photo_item = self.capture_canvas.create_text(
-                self.root.winfo_screenwidth() - 40,
-                30,
-                text="Photo 1",
-                fill="white",
-                font=self.font_small,
-                anchor="ne",
-                state="hidden"
-            )
-
-            # Big countdown number
-            self.countdown_item = self.capture_canvas.create_text(
-                self.root.winfo_screenwidth() // 2,
-                int(self.root.winfo_screenheight() * 0.52),
-                text="",
-                fill="white",
-                font=self.font_countdown,
-                anchor="center",
-                state="hidden"
-            )
-
-        # -------------------------
-        # Screen navigation
-        # -------------------------
-        def clear_screens(self):
-            self.stop_welcome_pulse()
-            for child in self.container.winfo_children():
-                child.pack_forget()
-
-        def show_welcome_screen(self):
-            self.clear_screens()
-            self.welcome_frame.pack(expand=True, fill="both")
-
-            # Reset session/run state
-            self.is_running_sequence = False
-            self.session_paid = False
-            self._payment_in_progress = False
-            self._welcome_tap_enabled = True
-
-            # Reset welcome subtitle
-            try:
-                self.welcome_canvas.itemconfig(
-                    self.subtitle_item,
-                    text="Tap to pay & start"
-                )
-            except Exception:
-                pass
-
-            # Restart welcome animation if available
-            try:
-                self.start_welcome_pulse()
-            except Exception:
-                pass
+        # Restart welcome animation if available
+        try:
+            self.start_welcome_pulse()
+        except Exception:
+            pass
 
     def _get_font_with_size(self, base_font, size: int):
         """
@@ -1221,68 +1221,68 @@ class PhotoBoothUI:
             print(f"[PRINT ERROR] {details}")
             return False, details[:400]
 
-        def cleanup_session_files_and_return(self):
-            """
-            Delete all temporary session files:
-            - original captured camera photos
-            - composed strip file
-            Then reset booth state and return to welcome screen.
-            """
-            deleted = 0
+    def cleanup_session_files_and_return(self):
+        """
+        Delete all temporary session files:
+        - original captured camera photos
+        - composed strip file
+        Then reset booth state and return to welcome screen.
+        """
+        deleted = 0
 
-            # Delete captured original photos from computer
-            for f in list(getattr(self, "captured_files", []) or []):
-                try:
-                    p = Path(f)
-                    print("[CLEANUP] trying delete captured photo:", p)
+        # Delete captured original photos from computer
+        for f in list(getattr(self, "captured_files", []) or []):
+            try:
+                p = Path(f)
+                print("[CLEANUP] trying delete captured photo:", p)
 
-                    if p.exists():
-                        p.unlink()
-                        deleted += 1
-                        print("[CLEANUP] deleted captured photo:", p)
-                    else:
-                        print("[CLEANUP] captured photo not found:", p)
+                if p.exists():
+                    p.unlink()
+                    deleted += 1
+                    print("[CLEANUP] deleted captured photo:", p)
+                else:
+                    print("[CLEANUP] captured photo not found:", p)
 
-                except Exception as e:
-                    print(f"[WARN] Could not delete captured photo {f}: {e}")
+            except Exception as e:
+                print(f"[WARN] Could not delete captured photo {f}: {e}")
 
-            # Delete composed strip from computer
-            last_strip = getattr(self, "last_composed_strip", None)
-            if last_strip:
-                try:
-                    p = Path(last_strip)
-                    print("[CLEANUP] trying delete composed strip:", p)
+        # Delete composed strip from computer
+        last_strip = getattr(self, "last_composed_strip", None)
+        if last_strip:
+            try:
+                p = Path(last_strip)
+                print("[CLEANUP] trying delete composed strip:", p)
 
-                    if p.exists():
-                        p.unlink()
-                        deleted += 1
-                        print("[CLEANUP] deleted composed strip:", p)
-                    else:
-                        print("[CLEANUP] composed strip not found:", p)
+                if p.exists():
+                    p.unlink()
+                    deleted += 1
+                    print("[CLEANUP] deleted composed strip:", p)
+                else:
+                    print("[CLEANUP] composed strip not found:", p)
 
-                except Exception as e:
-                    print(f"[WARN] Could not delete composed strip {last_strip}: {e}")
+            except Exception as e:
+                print(f"[WARN] Could not delete composed strip {last_strip}: {e}")
 
-            # Reset session state
-            self.captured_files = []
-            self.last_composed_strip = None
-            self._payment_in_progress = False
-            self.session_paid = False
-            self.is_running_sequence = False
-            self.photo_index = 1
+        # Reset session state
+        self.captured_files = []
+        self.last_composed_strip = None
+        self._payment_in_progress = False
+        self.session_paid = False
+        self.is_running_sequence = False
+        self.photo_index = 1
 
-            print(f"[CLEANUP] done. deleted {deleted} files.")
+        print(f"[CLEANUP] done. deleted {deleted} files.")
 
-            # Return to welcome screen
-            self.show_welcome_screen()
+        # Return to welcome screen
+        self.show_welcome_screen()
 
-        def hide_template_grid(self):
-            print("HIDING TEMPLATE COUNT:", len(self._template_grid_item_ids))
-            for item_id in self._template_grid_item_ids:
-                try:
-                    self.template_canvas.itemconfig(item_id, state="hidden")
-                except Exception:
-                    pass
+    def hide_template_grid(self):
+        print("HIDING TEMPLATE COUNT:", len(self._template_grid_item_ids))
+        for item_id in self._template_grid_item_ids:
+            try:
+                self.template_canvas.itemconfig(item_id, state="hidden")
+            except Exception:
+                pass
 
     def cleanup_and_exit(self):
         try:
