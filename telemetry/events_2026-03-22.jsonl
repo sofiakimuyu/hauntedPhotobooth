@@ -1,0 +1,17 @@
+{"ts": "2026-03-22T14:11:59", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-22T14:11:59", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-22T14:11:59", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-22T14:12:02", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 14}}
+{"ts": "2026-03-22T14:12:46", "booth_id": "Stanford booth", "type": "session_started", "data": {}}
+{"ts": "2026-03-22T14:13:08", "booth_id": "Stanford booth", "type": "template_chosen", "data": {"template_id": "Template 6"}}
+{"ts": "2026-03-22T14:13:13", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "request id is HP_LaserJet_MFP_M130fw__5FB0F4_-67 (1 file(s))"}}
+{"ts": "2026-03-22T14:13:20", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-03-22T14:13:24", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-22T14:13:24", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-22T14:13:24", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-22T14:13:25", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 16}}
+{"ts": "2026-03-22T14:13:28", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-03-22T14:13:58", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-22T14:13:58", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-22T14:13:58", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-22T14:13:58", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 54, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}

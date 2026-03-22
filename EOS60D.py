@@ -35,8 +35,8 @@ HAS_PREVIEW = False
 # Telemetry setup
 telemetry = Telemetry(
     booth_id="Stanford booth",
-    telegram_token="YOUR_TOKEN_HERE",  # move to env later
-    telegram_chat_id="YOUR_CHAT_ID",
+    telegram_token="8537687055:AAHtcNOv2l-QYRmMBvcDNK8idGF2EmUnT7c",
+    telegram_chat_id="8471596713",
     roll_warn_1=143,
     roll_warn_2=147
 )
@@ -48,6 +48,7 @@ telemetry.booth_started()
 # REMOVE AFTER TESTING
 telemetry.print_result(ok=False, details="test fail")
 telemetry.print_result(ok=True, details="test success")
+telemetry.send_telegram("✅ Booth connected successfully")
 
 # Stripe Setup
 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
@@ -1214,12 +1215,16 @@ class PhotoBoothUI:
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
-            text="Printing your photos!"
+            text="Printing your photos...\nPlease wait!"
         )
         self.template_canvas.tag_raise(self.template_status_item)
 
-        # Print, then continue flow
-        self.root.after(1000, lambda: self._print_then_done(str(out_path)))
+        # Start printing in a background thread so UI stays visible
+        import threading
+        threading.Thread(
+            target=lambda: self._print_then_done(str(out_path)),
+            daemon=True
+        ).start()
 
     def show_printing_message(self):
         self.template_canvas.itemconfig(
@@ -1256,7 +1261,7 @@ class PhotoBoothUI:
             state="normal",
             text="Done!"
         )
-        self.root.after(2000, self.cleanup_session_files_and_return)
+        self.root.after(5000, self.cleanup_session_files_and_return)
 
     def print_file(self, file_path: str) -> tuple[bool, str]:
         try:
