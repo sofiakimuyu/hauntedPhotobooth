@@ -1221,68 +1221,68 @@ class PhotoBoothUI:
             print(f"[PRINT ERROR] {details}")
             return False, details[:400]
 
-    def cleanup_session_files_and_return(self):
-        """
-        Delete all temporary session files:
-        - original captured camera photos
-        - composed strip file
-        Then reset booth state and return to welcome screen.
-        """
-        deleted = 0
+        def cleanup_session_files_and_return(self):
+            """
+            Delete all temporary session files:
+            - original captured camera photos
+            - composed strip file
+            Then reset booth state and return to welcome screen.
+            """
+            deleted = 0
 
-        # Delete captured original photos from computer
-        for f in list(getattr(self, "captured_files", []) or []):
-            try:
-                p = Path(f)
-                print("[CLEANUP] trying delete captured photo:", p)
+            # Delete captured original photos from computer
+            for f in list(getattr(self, "captured_files", []) or []):
+                try:
+                    p = Path(f)
+                    print("[CLEANUP] trying delete captured photo:", p)
 
-                if p.exists():
-                    p.unlink()
-                    deleted += 1
-                    print("[CLEANUP] deleted captured photo:", p)
-                else:
-                    print("[CLEANUP] captured photo not found:", p)
+                    if p.exists():
+                        p.unlink()
+                        deleted += 1
+                        print("[CLEANUP] deleted captured photo:", p)
+                    else:
+                        print("[CLEANUP] captured photo not found:", p)
 
-            except Exception as e:
-                print(f"[WARN] Could not delete captured photo {f}: {e}")
+                except Exception as e:
+                    print(f"[WARN] Could not delete captured photo {f}: {e}")
 
-        # Delete composed strip from computer
-        last_strip = getattr(self, "last_composed_strip", None)
-        if last_strip:
-            try:
-                p = Path(last_strip)
-                print("[CLEANUP] trying delete composed strip:", p)
+            # Delete composed strip from computer
+            last_strip = getattr(self, "last_composed_strip", None)
+            if last_strip:
+                try:
+                    p = Path(last_strip)
+                    print("[CLEANUP] trying delete composed strip:", p)
 
-                if p.exists():
-                    p.unlink()
-                    deleted += 1
-                    print("[CLEANUP] deleted composed strip:", p)
-                else:
-                    print("[CLEANUP] composed strip not found:", p)
+                    if p.exists():
+                        p.unlink()
+                        deleted += 1
+                        print("[CLEANUP] deleted composed strip:", p)
+                    else:
+                        print("[CLEANUP] composed strip not found:", p)
 
-            except Exception as e:
-                print(f"[WARN] Could not delete composed strip {last_strip}: {e}")
+                except Exception as e:
+                    print(f"[WARN] Could not delete composed strip {last_strip}: {e}")
 
-        # Reset session state
-        self.captured_files = []
-        self.last_composed_strip = None
-        self._payment_in_progress = False
-        self.session_paid = False
-        self.is_running_sequence = False
-        self.photo_index = 1
+            # Reset session state
+            self.captured_files = []
+            self.last_composed_strip = None
+            self._payment_in_progress = False
+            self.session_paid = False
+            self.is_running_sequence = False
+            self.photo_index = 1
 
-        print(f"[CLEANUP] done. deleted {deleted} files.")
+            print(f"[CLEANUP] done. deleted {deleted} files.")
 
-        # Return to welcome screen
-        self.show_welcome_screen()
+            # Return to welcome screen
+            self.show_welcome_screen()
 
-    def hide_template_grid(self):
-        print("HIDING TEMPLATE COUNT:", len(self._template_grid_item_ids))
-        for item_id in self._template_grid_item_ids:
-            try:
-                self.template_canvas.itemconfig(item_id, state="hidden")
-            except Exception:
-                pass
+        def hide_template_grid(self):
+            print("HIDING TEMPLATE COUNT:", len(self._template_grid_item_ids))
+            for item_id in self._template_grid_item_ids:
+                try:
+                    self.template_canvas.itemconfig(item_id, state="hidden")
+                except Exception:
+                    pass
 
     def cleanup_and_exit(self):
         try:
@@ -1301,40 +1301,40 @@ class PhotoBoothUI:
         finally:
             self.root.destroy()
 
-    def main():
-        root = tk.Tk()
+def main():
+    root = tk.Tk()
 
-        # Heartbeat every 10 minutes
-        def schedule_heartbeat():
-            try:
-                telemetry.heartbeat(uptime_start=START_TIME)
-            except Exception:
-                pass
-            root.after(10 * 60 * 1000, schedule_heartbeat)
+    # Heartbeat every 10 minutes
+    def schedule_heartbeat():
+        try:
+            telemetry.heartbeat(uptime_start=START_TIME)
+        except Exception:
+            pass
+        root.after(10 * 60 * 1000, schedule_heartbeat)
 
-        schedule_heartbeat()
+    schedule_heartbeat()
 
-        # Build UI
-        PhotoBoothUI(root)
+    # Build UI
+    PhotoBoothUI(root)
 
-        # Window close handler
-        def on_close():
-            try:
-                telemetry.log_event("booth_stopped")
-            except Exception:
-                pass
+    # Window close handler
+    def on_close():
+        try:
+            telemetry.log_event("booth_stopped")
+        except Exception:
+            pass
 
-            try:
-                telemetry.send_telegram(f"🛑 Booth stopped ({telemetry.booth_id})")
-            except Exception:
-                pass
+        try:
+            telemetry.send_telegram(f"🛑 Booth stopped ({telemetry.booth_id})")
+        except Exception:
+            pass
 
-            root.destroy()
+        root.destroy()
 
-        root.protocol("WM_DELETE_WINDOW", on_close)
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
-        # Keep the app running
-        root.mainloop()
+    # Keep the app running
+    root.mainloop()
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
