@@ -20,6 +20,8 @@ import subprocess
 import shutil
 from tempfile import NamedTemporaryFile
 from datetime import datetime
+from analytics import log_print
+from dashboard import run_dashboard
 
 # where store camera photos on the PC
 INCOMING_DIR = Path(r"C:\photoboothphotos\incoming")
@@ -1267,6 +1269,7 @@ class PhotoBoothUI:
         try:
             with Image.open(file_path) as img:
                 print_pil_image(img, self.printer_name)
+            log_print(self.current_template)
             return True, "Printed successfully"
 
         except Exception as e:
@@ -1355,6 +1358,7 @@ class PhotoBoothUI:
             self.root.destroy()
 
 def main():
+    run_dashboard()
     root = tk.Tk()
 
     # Heartbeat every 10 minutes

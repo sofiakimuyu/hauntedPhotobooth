@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photobooth Analytics</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --border: #2a2a3a;
+    --accent: #c8f060;
+    --accent2: #7060f0;
+    --accent3: #f06090;
+    --text: #e8e8f0;
+    --muted: #6868a0;
+    --card-radius: 16px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    padding: 0 0 60px;
+  }
+
+  /* ── Header ────────────────────────────────────── */
+  header {
+    padding: 28px 24px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+
+  .logo h1 {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    line-height: 1.1;
+  }
+
+  .logo span {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    font-weight: 400;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .refresh-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+  }
+
+  .refresh-btn:hover { background: var(--border); }
+  .refresh-btn.spinning { color: var(--accent); }
+
+  /* ── Main grid ─────────────────────────────────── */
+  main {
+    padding: 24px 16px;
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Hero stats row ─────────────────────────────── */
+  .hero-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 20px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .stat-card.today::before { background: var(--accent); }
+  .stat-card.total::before { background: var(--accent2); }
+
+  .stat-label {
+    font-size: 10px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -2px;
+  }
+
+  .stat-card.today .stat-value { color: var(--accent); }
+  .stat-card.total .stat-value { color: var(--accent2); }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* ── Section cards ─────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+  }
+
+  .card-title {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Template bars ─────────────────────────────── */
+  .template-list { display: flex; flex-direction: column; gap: 10px; }
+
+  .template-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .template-name {
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .template-bar-wrap {
+    flex: 2;
+    height: 8px;
+    background: var(--surface2);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .template-bar {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent3));
+    transition: width 0.6s cubic-bezier(.16,1,.3,1);
+  }
+
+  .template-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    min-width: 28px;
+    text-align: right;
+  }
+
+  /* ── Rank badge ─────────────────────────────────── */
+  .rank {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    min-width: 20px;
+  }
+
+  .rank.gold { color: #f0c840; }
+  .rank.silver { color: #b0b8c8; }
+  .rank.bronze { color: #c07840; }
+
+  /* ── Chart canvas ──────────────────────────────── */
+  .chart-wrap { position: relative; height: 180px; }
+
+  /* ── Recent prints ─────────────────────────────── */
+  .recent-list { display: flex; flex-direction: column; gap: 6px; }
+
+  .recent-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .recent-template {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .recent-time {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-right: 10px;
+    flex-shrink: 0;
+    animation: pulse 2s infinite;
+  }
+
+  .recent-item:not(:first-child) .dot { background: var(--border); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.4); }
+  }
+
+  /* ── Auto-refresh indicator ─────────────────────── */
+  .live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+
+  .live-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.5s infinite;
+  }
+
+  /* ── Empty state ────────────────────────────────── */
+  .empty {
+    text-align: center;
+    padding: 32px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+  }
+
+  /* ── Responsive ─────────────────────────────────── */
+  @media (min-width: 600px) {
+    main { padding: 28px 24px; }
+    .hero-stats { grid-template-columns: repeat(2, 1fr); }
+    .stat-value { font-size: 56px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">📸</div>
+    <h1>Photobooth<br><span>Analytics Dashboard</span></h1>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="live-badge"><div class="live-dot"></div> LIVE</div>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadStats()">↺ Refresh</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- Hero stats -->
+  <div class="hero-stats">
+    <div class="stat-card today">
+      <div class="stat-label">Today's Prints</div>
+      <div class="stat-value" id="todayCount">—</div>
+      <div class="stat-sub" id="todayDate">loading...</div>
+    </div>
+    <div class="stat-card total">
+      <div class="stat-label">All-Time Total</div>
+      <div class="stat-value" id="totalCount">—</div>
+      <div class="stat-sub" id="lastUpdated">loading...</div>
+    </div>
+  </div>
+
+  <!-- Hourly chart -->
+  <div class="card">
+    <div class="card-title">Prints by Hour — Today</div>
+    <div class="chart-wrap">
+      <canvas id="hourlyChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Templates -->
+  <div class="card">
+    <div class="card-title">Template Breakdown — All Time</div>
+    <div class="template-list" id="templateList">
+      <div class="empty">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Daily trend chart -->
+  <div class="card">
+    <div class="card-title">Daily Prints — Last 30 Days</div>
+    <div class="chart-wrap">
+      <canvas id="dailyChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Recent prints -->
+  <div class="card">
+    <div class="card-title">Recent Prints</div>
+    <div class="recent-list" id="recentList">
+      <div class="empty">Loading...</div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+let hourlyChart, dailyChart;
+
+const CHART_DEFAULTS = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false }, tooltip: { enabled: true } },
+  scales: {
+    x: {
+      grid: { color: '#2a2a3a', drawBorder: false },
+      ticks: { color: '#6868a0', font: { family: 'DM Mono', size: 10 } }
+    },
+    y: {
+      grid: { color: '#2a2a3a', drawBorder: false },
+      ticks: { color: '#6868a0', font: { family: 'DM Mono', size: 10 }, precision: 0 },
+      beginAtZero: true
+    }
+  }
+};
+
+function initCharts() {
+  const hourCtx = document.getElementById('hourlyChart').getContext('2d');
+  hourlyChart = new Chart(hourCtx, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: '#c8f060aa', borderColor: '#c8f060', borderWidth: 1, borderRadius: 4 }] },
+    options: { ...CHART_DEFAULTS }
+  });
+
+  const dailyCtx = document.getElementById('dailyChart').getContext('2d');
+  dailyChart = new Chart(dailyCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: '#7060f0', backgroundColor: '#7060f022', borderWidth: 2, fill: true, tension: 0.4, pointBackgroundColor: '#7060f0', pointRadius: 3 }] },
+    options: { ...CHART_DEFAULTS }
+  });
+}
+
+function rankSymbol(i) {
+  if (i === 0) return '<span class="rank gold">01</span>';
+  if (i === 1) return '<span class="rank silver">02</span>';
+  if (i === 2) return '<span class="rank bronze">03</span>';
+  return `<span class="rank">${String(i+1).padStart(2,'0')}</span>`;
+}
+
+function fmtTime(isoStr) {
+  const d = new Date(isoStr);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDate(isoStr) {
+  const d = new Date(isoStr + (isoStr.includes('T') ? '' : 'T00:00:00'));
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+async function loadStats() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  btn.textContent = '↻ Loading';
+
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+
+    // Hero
+    document.getElementById('todayCount').textContent = data.today;
+    document.getElementById('totalCount').textContent = data.total;
+    document.getElementById('todayDate').textContent = new Date().toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Hourly chart
+    const allHours = Array.from({length: 24}, (_, i) => String(i).padStart(2,'0'));
+    const hourMap = {};
+    data.hourly_today.forEach(h => { hourMap[h.hour] = h.count; });
+    hourlyChart.data.labels = allHours.map(h => h + ':00');
+    hourlyChart.data.datasets[0].data = allHours.map(h => hourMap[h] || 0);
+    hourlyChart.update('none');
+
+    // Templates
+    const tList = document.getElementById('templateList');
+    if (!data.templates.length) {
+      tList.innerHTML = '<div class="empty">No prints recorded yet.</div>';
+    } else {
+      const max = data.templates[0].count;
+      tList.innerHTML = data.templates.map((t, i) => `
+        <div class="template-row">
+          ${rankSymbol(i)}
+          <div class="template-name">${t.template}</div>
+          <div class="template-bar-wrap">
+            <div class="template-bar" style="width:${Math.round(t.count/max*100)}%"></div>
+          </div>
+          <div class="template-count">${t.count}</div>
+        </div>
+      `).join('');
+    }
+
+    // Daily chart
+    dailyChart.data.labels = data.daily_last_30.map(d => fmtDate(d.day));
+    dailyChart.data.datasets[0].data = data.daily_last_30.map(d => d.count);
+    dailyChart.update('none');
+
+    // Recent
+    const rList = document.getElementById('recentList');
+    if (!data.last_10.length) {
+      rList.innerHTML = '<div class="empty">No prints recorded yet.</div>';
+    } else {
+      rList.innerHTML = data.last_10.map((p, i) => `
+        <div class="recent-item">
+          <div style="display:flex;align-items:center;">
+            <div class="dot"></div>
+            <div class="recent-template">${p.template}</div>
+          </div>
+          <div class="recent-time">${fmtTime(p.printed_at)}</div>
+        </div>
+      `).join('');
+    }
+
+  } catch(e) {
+    console.error(e);
+    document.getElementById('todayCount').textContent = '!';
+    document.getElementById('totalCount').textContent = '!';
+  } finally {
+    btn.classList.remove('spinning');
+    btn.textContent = '↺ Refresh';
+  }
+}
+
+// Auto-refresh every 30s
+initCharts();
+loadStats();
+setInterval(loadStats, 30000);
+</script>
+</body>
+</html>
