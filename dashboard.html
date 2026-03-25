@@ -320,7 +320,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <div class="live-badge"><div class="live-dot"></div> LIVE</div>
-    <button class="refresh-btn" id="refreshBtn" onclick="loadStats()">↺ Refresh</button>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadStats()">Refresh</button>
   </div>
 </header>
 
@@ -342,7 +342,7 @@
 
   <!-- Hourly chart -->
   <div class="card">
-    <div class="card-title">Prints by Hour — Today</div>
+    <div class="card-title">Prints by Hour - Today</div>
     <div class="chart-wrap">
       <canvas id="hourlyChart"></canvas>
     </div>
@@ -350,7 +350,7 @@
 
   <!-- Templates -->
   <div class="card">
-    <div class="card-title">Template Breakdown — All Time</div>
+    <div class="card-title">Template Breakdown - All Time</div>
     <div class="template-list" id="templateList">
       <div class="empty">Loading...</div>
     </div>
@@ -358,7 +358,7 @@
 
   <!-- Daily trend chart -->
   <div class="card">
-    <div class="card-title">Daily Prints — Last 30 Days</div>
+    <div class="card-title">Daily Prints - Last 30 Days</div>
     <div class="chart-wrap">
       <canvas id="dailyChart"></canvas>
     </div>
@@ -430,7 +430,7 @@ function fmtDate(isoStr) {
 async function loadStats() {
   const btn = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
-  btn.textContent = '↻ Loading';
+  btn.textContent = 'Loading...';
 
   try {
     const res = await fetch('/api/stats');
@@ -495,7 +495,7 @@ async function loadStats() {
     document.getElementById('totalCount').textContent = '!';
   } finally {
     btn.classList.remove('spinning');
-    btn.textContent = '↺ Refresh';
+    btn.textContent = 'Refresh';
   }
 }
 

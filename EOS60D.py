@@ -22,6 +22,8 @@ from tempfile import NamedTemporaryFile
 from datetime import datetime
 from analytics import log_print
 from dashboard import run_dashboard
+import signal
+import sys
 
 # where store camera photos on the PC
 INCOMING_DIR = Path(r"C:\photoboothphotos\incoming")
@@ -405,9 +407,10 @@ def side_by_side(
     return canvas
 
 class PhotoBoothUI:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, telemetry):
         # ---- window setup ----
         self.root = root
+        self.telemetry = telemetry
         self.root.title("PhotoBooth")
         self.root.attributes("-fullscreen", True)
         self.root.configure(bg="black")
@@ -868,17 +871,9 @@ class PhotoBoothUI:
         if n <= 0:
             self.capture_canvas.itemconfig(self.countdown_item, text="", state="hidden")
             self.capture_photo()
-
-            # Move to next photo after a short beat
-            self.photo_index += 1
-            self.root.after(2000, self.start_next_photo)
             return
 
-        self.capture_canvas.itemconfig(
-            self.countdown_item,
-            text=str(n),
-            state="normal"
-        )
+        self.capture_canvas.itemconfig(self.countdown_item, text=str(n), state="normal")
         self.root.after(1000, lambda: self.run_countdown(n - 1))
 
     def finish_sequence(self):
@@ -906,35 +901,68 @@ class PhotoBoothUI:
     # Capture with gphoto2
     # -------------------------
     def capture_photo(self):
-        try:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            output_path = INCOMING_DIR / f"photo_{self.photo_index}_{ts}.jpg"
+        def _do_capture():
+            try:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                output_path = INCOMING_DIR / f"photo_{self.photo_index}_{ts}.jpg"
 
-            # Give camera a moment to settle/focus before triggering
-            time.sleep(0.8)
+                # Let the camera settle a little before triggering
+                time.sleep(0.6)
 
-            # Flash effect immediately before capture
-            self.capture_canvas.configure(bg="white")
-            self.root.update()
-            time.sleep(0.08)
+                result_holder = {"saved_path": None, "error": None}
 
-            saved_path = capture_photo_gphoto(output_path)
+                def _run_camera():
+                    try:
+                        result_holder["saved_path"] = capture_photo_gphoto(output_path)
+                    except Exception as e:
+                        result_holder["error"] = e
 
-            self.capture_canvas.configure(bg="black")
-            self.root.update()
+                import threading
+                camera_thread = threading.Thread(target=_run_camera, daemon=True)
+                camera_thread.start()
 
-            self.captured_files.append(str(saved_path))
-            print(f"[OK] Captured {saved_path}")
+                # Delay fake flash slightly so it lines up better with the real shutter
+                time.sleep(0.18)
 
-        except Exception as e:
-            print(f"[CAPTURE ERROR] Photo {self.photo_index} failed: {e}")
-            messagebox.showerror(
-                "Camera Error",
-                f"Could not capture photo {self.photo_index}.\n\n{e}"
-            )
-            self.is_running_sequence = False
-            self.session_paid = False
-            self.show_welcome_screen()
+                self.root.after(0, lambda: self.capture_canvas.configure(bg="white"))
+                self.root.after(0, self.root.update)
+
+                time.sleep(0.10)
+
+                self.root.after(0, lambda: self.capture_canvas.configure(bg="black"))
+                self.root.after(0, self.root.update)
+
+                camera_thread.join()
+
+                if result_holder["error"] is not None:
+                    raise result_holder["error"]
+
+                saved_path = result_holder["saved_path"]
+                self.captured_files.append(str(saved_path))
+                print(f"[OK] Captured {saved_path}")
+
+                def _advance_after_capture():
+                    self.photo_index += 1
+                    self.root.after(500, self.start_next_photo)
+
+                self.root.after(0, _advance_after_capture)
+
+            except Exception as e:
+                print(f"[CAPTURE ERROR] Photo {self.photo_index} failed: {e}")
+
+                def _handle_error():
+                    messagebox.showerror(
+                        "Camera Error",
+                        f"Could not capture photo {self.photo_index}.\n\n{e}"
+                    )
+                    self.is_running_sequence = False
+                    self.session_paid = False
+                    self.show_welcome_screen()
+
+                self.root.after(0, _handle_error)
+
+        import threading
+        threading.Thread(target=_do_capture, daemon=True).start()
 
     # -------------------------
     # Cleanup
@@ -1277,6 +1305,46 @@ class PhotoBoothUI:
             print(f"[PRINT ERROR] {details}")
             return False, details[:400]
 
+    def shutdown_booth(self):
+        if getattr(self, "_is_shutting_down", False):
+            return
+        self._is_shutting_down = True
+
+        print("Shutting down booth...")
+
+        try:
+            self.telemetry.log_event("booth_stopped")
+            print("Logged booth_stopped")
+        except Exception as e:
+            print(f"Failed to log booth_stopped: {e}")
+
+        try:
+            self.telemetry.send_telegram(f"🛑 Booth stopped ({self.telemetry.booth_id})")
+            print("Telegram sent")
+        except Exception as e:
+            print(f"Failed to send Telegram stop message: {e}")
+
+        try:
+            for f in list(getattr(self, "captured_files", []) or []):
+                try:
+                    Path(f).unlink(missing_ok=True)
+                except Exception as e:
+                    print(f"Failed to delete file {f}: {e}")
+
+            last_strip = getattr(self, "last_composed_strip", None)
+            if last_strip:
+                try:
+                    Path(last_strip).unlink(missing_ok=True)
+                except Exception as e:
+                    print(f"Failed to delete strip {last_strip}: {e}")
+        finally:
+            try:
+                self.root.destroy()
+            except Exception as e:
+                print(f"Failed to destroy root: {e}")
+
+    def cleanup_and_exit(self):
+        self.shutdown_booth()
     def cleanup_session_files_and_return(self):
         """
         Delete all temporary session files:
@@ -1340,57 +1408,30 @@ class PhotoBoothUI:
             except Exception:
                 pass
 
-    def cleanup_and_exit(self):
-        try:
-            for f in list(getattr(self, "captured_files", []) or []):
-                try:
-                    Path(f).unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-            last_strip = getattr(self, "last_composed_strip", None)
-            if last_strip:
-                try:
-                    Path(last_strip).unlink(missing_ok=True)
-                except Exception:
-                    pass
-        finally:
-            self.root.destroy()
-
 def main():
     run_dashboard()
     root = tk.Tk()
 
-    # Heartbeat every 10 minutes
+    # Heartbeat every 1 hour
     def schedule_heartbeat():
         try:
             telemetry.heartbeat(uptime_start=START_TIME)
-        except Exception:
-            pass
-        root.after(10 * 60 * 1000, schedule_heartbeat)
+        except Exception as e:
+            print(f"Heartbeat failed: {e}")
+        root.after(60 * 60 * 1000, schedule_heartbeat)
 
     schedule_heartbeat()
 
-    # Build UI
-    PhotoBoothUI(root)
+    # Build UI ONCE
+    app = PhotoBoothUI(root, telemetry)
 
-    # Window close handler
-    def on_close():
-        try:
-            telemetry.log_event("booth_stopped")
-        except Exception:
-            pass
+    def handle_sigint(sig, frame):
+        app.shutdown_booth()
+        sys.exit(0)
 
-        try:
-            telemetry.send_telegram(f"🛑 Booth stopped ({telemetry.booth_id})")
-        except Exception:
-            pass
+    root.protocol("WM_DELETE_WINDOW", app.shutdown_booth)
+    signal.signal(signal.SIGINT, handle_sigint)
 
-        root.destroy()
-
-    root.protocol("WM_DELETE_WINDOW", on_close)
-
-    # Keep the app running
     root.mainloop()
 
 if __name__ == "__main__":
