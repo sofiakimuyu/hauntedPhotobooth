@@ -434,7 +434,7 @@ class PhotoBoothUI:
         # ---- assets ----
         self.welcome_bg_path = os.path.join(
             os.path.dirname(__file__),
-            "stanfordwelcomebackground"
+            "stanfordwelcomebackground.png"
         )
 
         print(
@@ -560,7 +560,8 @@ class PhotoBoothUI:
         self.welcome_text_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
             200,
-            text="Welcome",
+            #pause on a message for now
+            text="",
             fill="white",
             font=self.font_title,
             anchor="center"
@@ -569,7 +570,7 @@ class PhotoBoothUI:
         # Subtitle
         self.subtitle_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
-            300,
+            800,
             text="Tap to pay & start",
             fill="white",
             font=self.font_subtitle,

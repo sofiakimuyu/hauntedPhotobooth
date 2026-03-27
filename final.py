@@ -295,7 +295,7 @@ class PhotoBoothUI:
         # ---- assets (optional) ----
         # If you want a welcome background image, set this path to your file.
         # Example: "assets/welcome_bg.jpg"
-        self.welcome_bg_path = os.path.join(os.path.dirname(__file__), "stanfordwelcomebackground")
+        self.welcome_bg_path = os.path.join(os.path.dirname(__file__), "stanfordwelcomebackground.png")
         print("WELCOME BG PATH:", self.welcome_bg_path, "exists?", os.path.exists(self.welcome_bg_path))
         self.tk_welcome_bg = None  # keep ref if loaded
 

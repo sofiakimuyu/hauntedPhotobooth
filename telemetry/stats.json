@@ -5,9 +5,9 @@
     "sessions_started": 5,
     "sessions_completed": 0,
     "photos_taken": 0,
-    "prints_total": 34,
-    "prints_success": 19,
-    "prints_failed": 15,
+    "prints_total": 38,
+    "prints_success": 21,
+    "prints_failed": 17,
     "template_counts": {
       "Template 1": 1,
       "Template 5": 1,
@@ -66,14 +66,14 @@
       "sessions_started": 0,
       "sessions_completed": 0,
       "photos_taken": 0,
-      "prints_total": 2,
-      "prints_success": 1,
-      "prints_failed": 1,
+      "prints_total": 6,
+      "prints_success": 3,
+      "prints_failed": 3,
       "template_counts": {}
     }
   },
   "paper": {
-    "roll_prints": 18,
+    "roll_prints": 20,
     "last_reset_at": null,
     "notified_at": {
       "143": false,
@@ -81,7 +81,7 @@
     }
   },
   "last_event": {
-    "ts": "2026-03-26T20:53:20",
+    "ts": "2026-03-26T21:06:51",
     "booth_id": "Stanford booth",
     "type": "booth_stopped",
     "data": {}
