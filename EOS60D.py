@@ -434,7 +434,7 @@ class PhotoBoothUI:
         # ---- assets ----
         self.welcome_bg_path = os.path.join(
             os.path.dirname(__file__),
-            "stanfordwelcomebackground.jpg"
+            "stanfordwelcomebackground"
         )
 
         print(
