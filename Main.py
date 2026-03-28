@@ -16,6 +16,7 @@ if not os.path.exists(PHOTO_SAVE_DIR):
 paid = False
 
 # -----------------------------
+
 # UI CLASS
 # -----------------------------
 class PhotoBoothApp(QWidget):
@@ -79,11 +80,31 @@ class PhotoBoothApp(QWidget):
         global paid
         paid = False
         self.label.setText("LOCKED: Please pay to start")
-        self.label.setStyleSheet("font-size: 32px; color: red;")
+        self.label.setStyleSheet("font-size: 32px; color: red;")-----------------------------
+class PhotoBoothApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Photobooth Test")
+        self.setGeometry(100, 100, 800, 600)
 
-# -----------------------------
-# RUN APP
-# -----------------------------
+        self.layout = QVBoxLayout()
+        self.label = QLabel("LOCKED: Please pay to start")
+        self.label.setStyleSheet("font-size: 32px; color: red;")
+        self.layout.addWidget(self.label)
+
+        self.start_button = QPushButton("Simulate Payment")
+        self.start_button.clicked.connect(self.simulate_payment)
+        self.layout.addWidget(self.start_button)
+
+        self.setLayout(self.layout)
+
+        self.countdown_timer = QTimer()
+        self.countdown_timer.timeout.connect(self.update_countdown)
+        self.countdown_value = 3
+
+
+# Run App
+# ---------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = PhotoBoothApp()

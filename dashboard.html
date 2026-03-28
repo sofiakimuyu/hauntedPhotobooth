@@ -303,6 +303,171 @@
     font-size: 12px;
   }
 
+  /* ── Offline state ──────────────────────────────── */
+  #offlineState {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg);
+    z-index: 100;
+  }
+
+  #offlineState.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .offline-message {
+    text-align: center;
+    padding: 40px 24px;
+    max-width: 500px;
+  }
+
+  .offline-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    opacity: 0.8;
+    animation: fadeInOut 2s ease-in-out infinite;
+  }
+
+  .offline-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 12px;
+  }
+
+  .offline-subtitle {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+
+  .offline-status {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--accent3);
+    margin-bottom: 16px;
+  }
+
+  .offline-retry-btn {
+    background: var(--accent2);
+    border: none;
+    color: var(--bg);
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .offline-retry-btn:hover {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  @keyframes fadeInOut {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+
+  /* ── Day Detail Modal ────────────────────────────── */
+  #dayDetailModal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(10, 10, 15, 0.95);
+    z-index: 200;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  #dayDetailModal.active {
+    display: block;
+  }
+
+  .day-detail-container {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .day-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .day-detail-title {
+    font-size: 24px;
+    font-weight: 700;
+  }
+
+  .day-detail-close {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .day-detail-close:hover {
+    background: var(--border);
+  }
+
+  .day-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .day-detail-chart { position: relative; height: 200px; }
+
+  .day-detail-stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .day-detail-stat .stat-label {
+    font-size: 9px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .day-detail-stat .stat-value {
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  @media (max-width: 768px) {
+    .day-detail-grid { grid-template-columns: 1fr; }
+  }
+
   /* ── Responsive ─────────────────────────────────── */
   @media (min-width: 600px) {
     main { padding: 28px 24px; }
@@ -312,6 +477,59 @@
 </style>
 </head>
 <body>
+
+<!-- Offline State Overlay -->
+<div id="offlineState">
+  <div class="offline-message">
+    <div class="offline-icon">📡</div>
+    <div class="offline-title">Booth Offline</div>
+    <div class="offline-subtitle">
+      The photobooth is not currently responding. 
+      The dashboard will remain available and will automatically reconnect.
+    </div>
+    <div class="offline-status" id="offlineStatusText">Connecting...</div>
+    <button class="offline-retry-btn" onclick="loadStats()">Retry Now</button>
+  </div>
+</div>
+
+<!-- Day Detail Modal -->
+<div id="dayDetailModal">
+  <div class="day-detail-container">
+    <div class="day-detail-header">
+      <div class="day-detail-title" id="dayDetailTitle">Loading...</div>
+      <button class="day-detail-close" onclick="closeDayDetail()">← Back</button>
+    </div>
+
+    <div class="day-detail-grid">
+      <div class="day-detail-stat">
+        <div class="stat-label">Total Prints</div>
+        <div class="stat-value" id="dayDetailCount">0</div>
+      </div>
+      <div class="day-detail-stat">
+        <div class="stat-label">Peak Hour</div>
+        <div class="stat-value" id="dayDetailPeakHour">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Hourly Breakdown</div>
+      <div class="chart-wrap">
+        <canvas id="dayDetailHourlyChart"></canvas>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">Templates</div>
+      <div class="template-list" id="dayDetailTemplateList"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">Recent Prints</div>
+      <div class="recent-list" id="dayDetailRecentList"></div>
+    </div>
+
+  </div>
+</div>
 
 <header>
   <div class="logo">
@@ -375,7 +593,8 @@
 </main>
 
 <script>
-let hourlyChart, dailyChart;
+let hourlyChart, dailyChart, dayDetailHourlyChart;
+let dailyStatsData = []; // Store dates for day detail modal
 
 const CHART_DEFAULTS = {
   responsive: true,
@@ -406,6 +625,35 @@ function initCharts() {
   dailyChart = new Chart(dailyCtx, {
     type: 'line',
     data: { labels: [], datasets: [{ data: [], borderColor: '#7060f0', backgroundColor: '#7060f022', borderWidth: 2, fill: true, tension: 0.4, pointBackgroundColor: '#7060f0', pointRadius: 3 }] },
+    options: {
+      ...CHART_DEFAULTS,
+      onClick: onDailyChartClick
+    }
+  });
+}
+
+function onDailyChartClick(event, elements) {
+  if (elements && elements.length > 0) {
+    const index = elements[0].index;
+    if (dailyStatsData[index]) {
+      loadDayDetail(dailyStatsData[index].date);
+    }
+  }
+}
+
+function initDayDetailChart() {
+  const chartId = 'dayDetailHourlyChart';
+  const canvas = document.getElementById(chartId);
+  if (!canvas) return;
+
+  if (dayDetailHourlyChart) {
+    dayDetailHourlyChart.destroy();
+  }
+
+  const ctx = canvas.getContext('2d');
+  dayDetailHourlyChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: '#c8f060aa', borderColor: '#c8f060', borderWidth: 1, borderRadius: 4 }] },
     options: { ...CHART_DEFAULTS }
   });
 }
@@ -429,12 +677,26 @@ function fmtDate(isoStr) {
 
 async function loadStats() {
   const btn = document.getElementById('refreshBtn');
+  const offlineState = document.getElementById('offlineState');
   btn.classList.add('spinning');
   btn.textContent = 'Loading...';
 
   try {
     const res = await fetch('/api/stats');
     const data = await res.json();
+
+    // Check booth status
+    if (data.booth_status === 'offline') {
+      // Show offline overlay
+      offlineState.classList.add('active');
+      document.getElementById('offlineStatusText').textContent = 
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + 
+        ' · Waiting for booth...';
+      return;
+    }
+
+    // Booth is online — hide offline overlay
+    offlineState.classList.remove('active');
 
     // Hero
     document.getElementById('todayCount').textContent = data.today;
@@ -469,6 +731,7 @@ async function loadStats() {
     }
 
     // Daily chart
+    dailyStatsData = data.daily_last_30;
     dailyChart.data.labels = data.daily_last_30.map(d => fmtDate(d.day));
     dailyChart.data.datasets[0].data = data.daily_last_30.map(d => d.count);
     dailyChart.update('none');
@@ -491,11 +754,91 @@ async function loadStats() {
 
   } catch(e) {
     console.error(e);
-    document.getElementById('todayCount').textContent = '!';
-    document.getElementById('totalCount').textContent = '!';
+    // Network error — show offline state
+    offlineState.classList.add('active');
+    document.getElementById('offlineStatusText').textContent = 
+      'Network error: ' + (e.message || 'Unable to connect');
   } finally {
     btn.classList.remove('spinning');
     btn.textContent = 'Refresh';
+  }
+}
+
+function closeDayDetail() {
+  document.getElementById('dayDetailModal').classList.remove('active');
+}
+
+async function loadDayDetail(dateStr) {
+  document.getElementById('dayDetailModal').classList.add('active');
+  document.getElementById('dayDetailTitle').textContent = `Loading ${dateStr}...`;
+
+  try {
+    const res = await fetch(`/api/stats/date/${dateStr}`);
+    const data = await res.json();
+
+    if (data.booth_status === 'offline') {
+      document.getElementById('dayDetailTitle').textContent = `${dateStr} — Booth Offline`;
+      return;
+    }
+
+    // Header
+    document.getElementById('dayDetailTitle').textContent = `${new Date(dateStr + 'T00:00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    document.getElementById('dayDetailCount').textContent = data.count;
+
+    // Find peak hour
+    let peakHour = '—';
+    if (data.hourly && data.hourly.length > 0) {
+      const maxHourly = data.hourly.reduce((max, h) => h.count > max.count ? h : max);
+      peakHour = `${maxHourly.hour}:00 (${maxHourly.count})`;
+    }
+    document.getElementById('dayDetailPeakHour').textContent = peakHour;
+
+    // Hourly chart
+    initDayDetailChart();
+    const allHours = Array.from({length: 24}, (_, i) => String(i).padStart(2,'0'));
+    const hourMap = {};
+    data.hourly.forEach(h => { hourMap[h.hour] = h.count; });
+    dayDetailHourlyChart.data.labels = allHours.map(h => h + ':00');
+    dayDetailHourlyChart.data.datasets[0].data = allHours.map(h => hourMap[h] || 0);
+    dayDetailHourlyChart.update('none');
+
+    // Templates
+    const tList = document.getElementById('dayDetailTemplateList');
+    if (!data.templates.length) {
+      tList.innerHTML = '<div class="empty">No prints on this day.</div>';
+    } else {
+      const max = data.templates[0].count;
+      tList.innerHTML = data.templates.map((t, i) => `
+        <div class="template-row">
+          ${rankSymbol(i)}
+          <div class="template-name">${t.template}</div>
+          <div class="template-bar-wrap">
+            <div class="template-bar" style="width:${Math.round(t.count/max*100)}%"></div>
+          </div>
+          <div class="template-count">${t.count}</div>
+        </div>
+      `).join('');
+    }
+
+    // Recent
+    const rList = document.getElementById('dayDetailRecentList');
+    if (!data.recent.length) {
+      rList.innerHTML = '<div class="empty">No prints on this day.</div>';
+    } else {
+      rList.innerHTML = data.recent.map((p, i) => `
+        <div class="recent-item">
+          <div style="display:flex;align-items:center;">
+            <div class="dot" ${i > 0 ? 'style="animation:none;"' : ''}></div>
+            <div class="recent-template">${p.template}</div>
+          </div>
+          <div class="recent-time">${fmtTime(p.printed_at)}</div>
+        </div>
+      `).join('');
+    }
+
+  } catch(e) {
+    console.error(e);
+    document.getElementById('dayDetailTitle').textContent = `${dateStr} — Error`;
   }
 }
 

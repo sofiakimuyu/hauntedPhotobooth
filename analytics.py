@@ -99,3 +99,51 @@ def get_stats():
         "daily_last_30": [dict(r) for r in reversed(daily)],
         "last_10": [dict(r) for r in last_10],
     }
+
+
+def get_stats_for_date(date_str: str):
+    """
+    Get detailed stats for a specific date (YYYY-MM-DD format).
+    Returns hourly breakdown, templates, and recent prints for that day.
+    """
+    init_db()
+    with _get_conn() as conn:
+        # Total for that specific day
+        day_count = conn.execute(
+            "SELECT COUNT(*) FROM prints WHERE DATE(printed_at) = ?", (date_str,)
+        ).fetchone()[0]
+
+        # Hourly breakdown for that day
+        hourly = conn.execute("""
+            SELECT strftime('%H', printed_at) as hour, COUNT(*) as count
+            FROM prints
+            WHERE DATE(printed_at) = ?
+            GROUP BY hour
+            ORDER BY hour
+        """, (date_str,)).fetchall()
+
+        # Template breakdown for that day
+        templates = conn.execute("""
+            SELECT template, COUNT(*) as count
+            FROM prints
+            WHERE DATE(printed_at) = ?
+            GROUP BY template
+            ORDER BY count DESC
+        """, (date_str,)).fetchall()
+
+        # Recent prints from that day
+        recent = conn.execute("""
+            SELECT template, printed_at
+            FROM prints
+            WHERE DATE(printed_at) = ?
+            ORDER BY printed_at DESC
+            LIMIT 20
+        """, (date_str,)).fetchall()
+
+    return {
+        "date": date_str,
+        "count": day_count,
+        "hourly": [dict(h) for h in hourly],
+        "templates": [dict(t) for t in templates],
+        "recent": [dict(r) for r in recent],
+    }
