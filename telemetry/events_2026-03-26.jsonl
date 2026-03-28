@@ -12,3 +12,36 @@
 {"ts": "2026-03-26T21:05:22", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
 {"ts": "2026-03-26T21:05:24", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 20}}
 {"ts": "2026-03-26T21:06:51", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-03-26T21:09:12", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:09:12", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:09:12", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:09:13", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 21}}
+{"ts": "2026-03-26T21:09:16", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-03-26T21:09:24", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:09:24", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:09:24", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:09:25", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 58, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
+{"ts": "2026-03-26T21:09:38", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:09:38", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:09:38", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:09:38", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
+{"ts": "2026-03-26T21:09:47", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:09:47", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:09:47", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:09:47", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
+{"ts": "2026-03-26T21:10:00", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:10:00", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:10:00", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:10:00", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
+{"ts": "2026-03-26T21:10:07", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:10:07", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:10:07", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:10:07", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
+{"ts": "2026-03-26T21:10:08", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:10:08", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:10:09", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:10:09", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
+{"ts": "2026-03-26T21:10:14", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-03-26T21:10:14", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-03-26T21:10:14", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-03-26T21:10:14", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}

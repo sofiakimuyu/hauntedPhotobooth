@@ -195,22 +195,32 @@ class Telemetry:
         self._save_stats()
         self.log_event("session_started")
 
-    def session_completed(self) -> None:
+    def session_completed(self, template_id: str | None = None) -> None:
         self._ensure_today_initialized()
+
         self._inc_counter(self._stats["lifetime"], "sessions_completed", 1)
         self._inc_counter(self._today_bucket(), "sessions_completed", 1)
+
+        tid = None
+        if template_id is not None:
+            tid = str(template_id)
+            self._inc_template(self._stats["lifetime"], tid, 1)
+            self._inc_template(self._today_bucket(), tid, 1)
+
         self._save_stats()
-        self.log_event("session_completed")
+
+        if tid is None:
+            self.log_event("session_completed")
+        else:
+            self.log_event("session_completed", template_id=tid)
 
     def template_chosen(self, template_id: str) -> None:
-        self._ensure_today_initialized()
-        tid = str(template_id)
-
-        self._inc_template(self._stats["lifetime"], tid, 1)
-        self._inc_template(self._today_bucket(), tid, 1)
-
-        self._save_stats()
-        self.log_event("template_chosen", template_id=tid)
+        """
+        Remember that a template was selected, but do not count it as a
+        completed use yet. Template usage should only be counted after a
+        successful completed session.
+        """
+        self.log_event("template_chosen", template_id=str(template_id))
 
     def photos_taken(self, n: int = 1) -> None:
         self._ensure_today_initialized()

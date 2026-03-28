@@ -570,7 +570,7 @@ class PhotoBoothUI:
         # Subtitle
         self.subtitle_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
-            800,
+            500,
             text="Tap to pay & start",
             fill="white",
             font=self.font_subtitle,
@@ -1272,11 +1272,11 @@ class PhotoBoothUI:
         """
         ok, details = self.print_file(composed_path)
 
-        # Telemetry
+        # Telemetry: print result
         try:
-            telemetry.print_result(ok=ok, details=details)
-        except Exception:
-            pass
+            self.telemetry.print_result(ok=ok, details=details)
+        except Exception as e:
+            print(f"Failed to log print result: {e}")
 
         if not ok:
             self.template_canvas.itemconfig(
@@ -1287,10 +1287,19 @@ class PhotoBoothUI:
             self.root.after(4000, self.cleanup_session_files_and_return)
             return
 
+        # Telemetry: successful session + template used
+        try:
+            self.telemetry.session_completed(
+                template_id=getattr(self, "selected_template_name", "unknown")
+            )
+            print("Logged session_completed")
+        except Exception as e:
+            print(f"Failed to log session_completed: {e}")
+
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
-            text="Done!"
+            text="Done Printing! Collect Your Photos Outside!"
         )
         self.root.after(5000, self.cleanup_session_files_and_return)
 
