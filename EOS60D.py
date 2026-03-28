@@ -76,7 +76,9 @@ telemetry = Telemetry(
     telegram_token=_tg_token,
     telegram_chat_id=_tg_chat,
     roll_warn_1=143,
-    roll_warn_2=147,
+    roll_warn_2=150,
+    heartbeat_expected_interval_sec=3600,
+    heartbeat_missed_multiplier=1.25,
 )
 
 if not _tg_token or not _tg_chat:
@@ -497,8 +499,23 @@ class PhotoBoothUI:
         self.build_capture_screen()
         self.build_template_picker_screen()
 
+        # Staff: after loading a new paper roll (telemetry roll limit was hit)
+        self.root.bind("<Control-Shift-P>", self._operator_clear_paper_lock)
+        self.root.bind("<Control-Shift-p>", self._operator_clear_paper_lock)
+
         # ---- start ----
         self.show_welcome_screen()
+
+    def _operator_clear_paper_lock(self, event=None):
+        try:
+            self.telemetry.clear_out_of_paper_lock()
+        except Exception as e:
+            print(f"[WARN] clear_out_of_paper_lock: {e}")
+            return "break"
+        if getattr(self, "_is_shutting_down", False):
+            return "break"
+        self.show_welcome_screen()
+        return "break"
 
     def charge_with_wisepos(self, amount_cents: int) -> bool:
         """
@@ -618,6 +635,8 @@ class PhotoBoothUI:
         self._welcome_tap_enabled = True
 
         def _on_welcome_tap(event=None):
+            if self.telemetry.is_out_of_paper():
+                return
             if (
                     not self._welcome_tap_enabled
                     or self.session_paid
@@ -738,18 +757,61 @@ class PhotoBoothUI:
         self.is_running_sequence = False
         self.session_paid = False
         self._payment_in_progress = False
-        self._welcome_tap_enabled = True
 
-        # Reset welcome subtitle
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+
+        if self.telemetry.is_out_of_paper():
+            self._welcome_tap_enabled = False
+            self.stop_welcome_pulse()
+            try:
+                self.welcome_canvas.coords(
+                    self.welcome_text_item, sw // 2, int(sh * 0.40)
+                )
+                self.welcome_canvas.coords(
+                    self.subtitle_item, sw // 2, int(sh * 0.58)
+                )
+                self.welcome_canvas.itemconfig(
+                    self.welcome_text_item,
+                    text="Out of Paper!",
+                    fill="white",
+                    font=self.font_title,
+                )
+                self.welcome_canvas.itemconfig(
+                    self.subtitle_item,
+                    text=(
+                        "This booth cannot take payments right now.\n"
+                        "Staff: load a new roll, then press Ctrl+Shift+P."
+                    ),
+                    fill="white",
+                    font=self.font_subtitle,
+                    width=min(920, sw - 80),
+                )
+            except Exception:
+                pass
+            return
+
+        self._welcome_tap_enabled = True
         try:
+            self.welcome_canvas.coords(self.welcome_text_item, sw // 2, 200)
+            self.welcome_canvas.coords(self.subtitle_item, sw // 2, 500)
+            self.welcome_canvas.itemconfig(
+                self.welcome_text_item,
+                text="",
+                fill="white",
+                font=self.font_title,
+            )
             self.welcome_canvas.itemconfig(
                 self.subtitle_item,
-                text="Tap to pay & start"
+                text="Tap to pay & start",
+                fill="white",
+                font=self.font_subtitle,
+                width=0,
             )
         except Exception:
             pass
 
-        # Restart welcome animation if available
+        self._welcome_subtitle_base_y = None
         try:
             self.start_welcome_pulse()
         except Exception:
@@ -846,6 +908,10 @@ class PhotoBoothUI:
         Entry point after successful payment.
         Must only run once per paid session.
         """
+        if self.telemetry.is_out_of_paper():
+            self.show_welcome_screen()
+            return
+
         if not getattr(self, "session_paid", False):
             return
 
@@ -1265,16 +1331,14 @@ class PhotoBoothUI:
         except Exception:
             pass
 
-        # Hide template grid and title so only status/preview remain
+        # Hide template grid and title; printing message appears after compose succeeds
         self.hide_template_grid()
         self.template_canvas.itemconfig(self.template_title_item, state="hidden")
         self.template_canvas.itemconfig(
             self.template_status_item,
-            state="normal",
-            text="Composing your strip..."
+            state="hidden",
+            text="",
         )
-        self.template_canvas.tag_raise(self.template_status_item)
-        self.root.update_idletasks()
 
         try:
             print("[DEBUG] Captured files going into compose:")
@@ -1388,7 +1452,7 @@ class PhotoBoothUI:
         except Exception as e:
             print(f"Failed to log session_completed: {e}")
 
-        PRINT_TIME_MS = 20000  # adjust if needed
+        PRINT_TIME_MS = 30000  # adjust if needed
 
         self.root.after(
             PRINT_TIME_MS,

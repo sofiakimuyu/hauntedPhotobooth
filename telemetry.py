@@ -13,16 +13,15 @@ class Telemetry:
     """
     Photobooth telemetry:
       - Crash detected message with stack trace (Telegram)
-      - Heartbeat message periodically (Telegram)
+      - Heartbeat message periodically (Telegram), optional "missed window" alert if a ping is late
       - Lifetime + daily counters for:
           * template selections
           * prints
           * photos taken
           * sessions started/completed
       - Paper "roll" tracking:
-          * notify at 143 prints on current roll
-          * notify at 147 prints on current roll
-          * automatically reset roll_prints to 0 at 147 (and log)
+          * notify at roll_warn_1 prints on current roll (default 143)
+          * notify at roll_warn_2 prints on current roll (default 150) and reset counter
       - Local persistence always (stats.json + daily jsonl log)
     """
 
@@ -33,7 +32,9 @@ class Telemetry:
         telegram_chat_id: Optional[str] = None,
         data_dir: str = "telemetry",
         roll_warn_1: int = 143,
-        roll_warn_2: int = 147,
+        roll_warn_2: int = 150,
+        heartbeat_expected_interval_sec: int = 3600,
+        heartbeat_missed_multiplier: float = 1.25,
     ):
         self.booth_id = booth_id
         self.telegram_token = (telegram_token or "").strip()
@@ -41,6 +42,8 @@ class Telemetry:
 
         self.roll_warn_1 = int(roll_warn_1)
         self.roll_warn_2 = int(roll_warn_2)
+        self.heartbeat_expected_interval_sec = max(60, int(heartbeat_expected_interval_sec))
+        self.heartbeat_missed_multiplier = max(1.0, float(heartbeat_missed_multiplier))
 
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -88,6 +91,7 @@ class Telemetry:
             "paper": {
                 "roll_prints": 0,  # prints on current roll since last reset
                 "last_reset_at": None,
+                "out_of_paper": False,  # set at roll_warn_2; booth blocks until cleared
                 "notified_at": {
                     str(self.roll_warn_1): False,
                     str(self.roll_warn_2): False,
@@ -136,6 +140,7 @@ class Telemetry:
             paper["notified_at"][str(self.roll_warn_1)] = False
         if str(self.roll_warn_2) not in paper["notified_at"]:
             paper["notified_at"][str(self.roll_warn_2)] = False
+        paper.setdefault("out_of_paper", False)
         self._stats["paper"] = paper
         self._save_stats()
 
@@ -185,6 +190,9 @@ class Telemetry:
     # ------------------------
     def booth_started(self) -> None:
         self._ensure_today_initialized()
+        # Fresh baseline so "missed heartbeat" is not computed across a previous shutdown gap
+        self._stats["last_heartbeat_at"] = datetime.now().isoformat(timespec="seconds")
+        self._save_stats()
         self.send_telegram(f"🎉 Booth started ({self.booth_id})")
         self.log_event("booth_started")
 
@@ -237,7 +245,7 @@ class Telemetry:
           - lifetime prints_total, prints_success/failed
           - daily prints_total, prints_success/failed
           - paper roll_prints (counts attempts as "prints" — adjust if you want success-only)
-          - roll threshold notifications at 143 and 147; reset at 147
+          - roll threshold notifications at roll_warn_1 and roll_warn_2; reset at roll_warn_2
         """
         self._ensure_today_initialized()
         details = str(details) if details else ""
@@ -255,40 +263,66 @@ class Telemetry:
             self._inc_counter(self._today_bucket(), "prints_failed", 1)
             self.log_event("print_failed", details=details)
 
-        # Paper roll tracking (✅ success-only)
-        paper = self._stats.get("paper", {})
+        # Paper roll tracking (✅ success-only). Must use dict on self._stats so counts persist.
+        paper = self._stats.setdefault("paper", {})
         paper.setdefault("roll_prints", 0)
         paper.setdefault("last_reset_at", None)
-        paper.setdefault("notified_at", {str(self.roll_warn_1): False, str(self.roll_warn_2): False})
+        na = paper.setdefault(
+            "notified_at",
+            {str(self.roll_warn_1): False, str(self.roll_warn_2): False},
+        )
+        if str(self.roll_warn_1) not in na:
+            na[str(self.roll_warn_1)] = False
+        if str(self.roll_warn_2) not in na:
+            na[str(self.roll_warn_2)] = False
+        self._stats["paper"] = paper
 
         if ok:
             paper["roll_prints"] = int(paper["roll_prints"]) + 1
             roll_prints = int(paper["roll_prints"])
 
-            # Notify at 143
-            if roll_prints >= self.roll_warn_1 and not paper["notified_at"].get(str(self.roll_warn_1), False):
+            # Notify at roll_warn_1 (default 143)
+            if roll_prints >= self.roll_warn_1 and not na.get(str(self.roll_warn_1), False):
                 self.send_telegram(
                     f"🧻 Paper warning ({self.booth_id}): roll_prints = {roll_prints} "
                     f"(threshold {self.roll_warn_1}). Prep a new roll soon."
                 )
-                paper["notified_at"][str(self.roll_warn_1)] = True
+                na[str(self.roll_warn_1)] = True
                 self.log_event("paper_threshold", threshold=self.roll_warn_1, roll_prints=roll_prints)
 
-            # Notify at 147 + reset roll counter to 0
-            if roll_prints >= self.roll_warn_2 and not paper["notified_at"].get(str(self.roll_warn_2), False):
+            # Notify at roll_warn_2 (default 150) + lock booth until staff clears + reset roll counter
+            if roll_prints >= self.roll_warn_2 and not na.get(str(self.roll_warn_2), False):
+                paper["out_of_paper"] = True
                 self.send_telegram(
                     f"🧻 PAPER CHANGE NOW ({self.booth_id}): roll_prints = {roll_prints} "
-                    f"(threshold {self.roll_warn_2}). Resetting roll counter to 0."
+                    f"(threshold {self.roll_warn_2}). Booth shows Out of Paper until staff "
+                    f"loads paper and clears (Ctrl+Shift+P). Counter reset."
                 )
-                paper["notified_at"][str(self.roll_warn_2)] = True
+                na[str(self.roll_warn_2)] = True
                 self.log_event("paper_threshold", threshold=self.roll_warn_2, roll_prints=roll_prints)
 
-                # Reset for next roll
                 paper["roll_prints"] = 0
                 paper["last_reset_at"] = datetime.now().isoformat(timespec="seconds")
-                paper["notified_at"][str(self.roll_warn_1)] = False
-                paper["notified_at"][str(self.roll_warn_2)] = False
+                na[str(self.roll_warn_1)] = False
+                na[str(self.roll_warn_2)] = False
                 self.log_event("paper_roll_reset", last_reset_at=paper["last_reset_at"])
+
+        # Persist roll_prints + notified_at (print_success/print_failed log_event runs before roll bump)
+        self._save_stats()
+
+    def is_out_of_paper(self) -> bool:
+        """True after the roll hits roll_warn_2 until clear_out_of_paper_lock()."""
+        self._ensure_today_initialized()
+        return bool(self._stats.get("paper", {}).get("out_of_paper", False))
+
+    def clear_out_of_paper_lock(self) -> None:
+        """Staff: call after loading a new paper roll so the booth can take payments again."""
+        self._ensure_today_initialized()
+        paper = self._stats.setdefault("paper", {})
+        paper["out_of_paper"] = False
+        self._stats["paper"] = paper
+        self._save_stats()
+        self.log_event("paper_lock_cleared")
 
     # ------------------------
     # Summary helpers (optional)
@@ -360,10 +394,50 @@ class Telemetry:
 
         sys.excepthook = excepthook
 
+    def _parse_last_heartbeat_ts(self, raw: Any) -> Optional[float]:
+        if raw is None:
+            return None
+        try:
+            if isinstance(raw, (int, float)):
+                return float(raw)
+            s = str(raw).strip()
+            if not s:
+                return None
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            return datetime.fromisoformat(s).timestamp()
+        except Exception:
+            return None
+
     def heartbeat(self, note: str = "", uptime_start: Optional[float] = None) -> None:
         """
-        Call periodically (e.g., every 10 minutes).
+        Call on a fixed schedule (see heartbeat_expected_interval_sec on Telemetry).
+        Sends Telegram if this call is later than interval * heartbeat_missed_multiplier
+        since last_heartbeat_at (booth hung, slept, or timer skipped). A fully powered-off
+        booth cannot notify; use an external watchdog for that.
         """
+        self._ensure_today_initialized()
+        now = datetime.now()
+        now_ts = now.timestamp()
+
+        prev_ts = self._parse_last_heartbeat_ts(self._stats.get("last_heartbeat_at"))
+        if prev_ts is not None:
+            gap = now_ts - prev_ts
+            threshold = self.heartbeat_expected_interval_sec * self.heartbeat_missed_multiplier
+            if gap > threshold:
+                exp_m = self.heartbeat_expected_interval_sec // 60
+                gap_m = int(gap // 60)
+                self.send_telegram(
+                    f"⚠️ Missed heartbeat window ({self.booth_id})\n"
+                    f"Last ping was ~{gap_m} min ago (expected about every {exp_m} min).\n"
+                    f"Booth may have hung, slept, or the app was stuck."
+                )
+                self.log_event(
+                    "heartbeat_missed",
+                    gap_sec=int(gap),
+                    threshold_sec=int(threshold),
+                )
+
         uptime = ""
         if uptime_start is not None:
             seconds = int(time.time() - uptime_start)
@@ -377,5 +451,7 @@ class Telemetry:
             text += f"\n{note}"
 
         self.send_telegram(text)
+        self._stats["last_heartbeat_at"] = now.isoformat(timespec="seconds")
+        self._save_stats()
         self.log_event("heartbeat", note=note, roll_prints=roll_prints)
 
