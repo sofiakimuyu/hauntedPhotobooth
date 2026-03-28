@@ -2,15 +2,15 @@
   "booth_id": "Stanford booth",
   "created_at": "2026-01-10T09:04:30",
   "lifetime": {
-    "sessions_started": 5,
-    "sessions_completed": 0,
+    "sessions_started": 6,
+    "sessions_completed": 1,
     "photos_taken": 0,
-    "prints_total": 54,
-    "prints_success": 29,
+    "prints_total": 55,
+    "prints_success": 30,
     "prints_failed": 25,
     "template_counts": {
       "Template 1": 1,
-      "Template 5": 1,
+      "Template 5": 2,
       "Template 4": 1,
       "Template 3": 1,
       "Template 6": 1
@@ -70,10 +70,21 @@
       "prints_success": 11,
       "prints_failed": 11,
       "template_counts": {}
+    },
+    "2026-03-28": {
+      "sessions_started": 1,
+      "sessions_completed": 1,
+      "photos_taken": 0,
+      "prints_total": 1,
+      "prints_success": 1,
+      "prints_failed": 0,
+      "template_counts": {
+        "Template 5": 1
+      }
     }
   },
   "paper": {
-    "roll_prints": 28,
+    "roll_prints": 29,
     "last_reset_at": null,
     "notified_at": {
       "143": false,
@@ -81,13 +92,9 @@
     }
   },
   "last_event": {
-    "ts": "2026-03-26T21:10:14",
+    "ts": "2026-03-28T08:20:23",
     "booth_id": "Stanford booth",
-    "type": "crash",
-    "data": {
-      "exc_type": "KeyError",
-      "message": "'STRIPE_SECRET_KEY'",
-      "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/final.py\", line 62, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"
-    }
+    "type": "booth_stopped",
+    "data": {}
   }
 }

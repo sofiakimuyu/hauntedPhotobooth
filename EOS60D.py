@@ -35,14 +35,55 @@ TEMPLATES_DIR = BASE_DIR / "PhotoboothTemplates"
 # No preview for this camera
 HAS_PREVIEW = False
 
-# Telemetry setup (optional: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+
+def _eos60d_telegram_credentials() -> tuple[Optional[str], Optional[str]]:
+    """
+    Token + chat id for telemetry Telegram. Priority:
+    1) Environment: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (or TELEGRAM_TOKEN + TELEGRAM_CHAT_ID)
+    2) Local file: telegram_secrets.json next to this script (gitignored). Keys: bot_token, chat_id
+    """
+    token = (
+        os.environ.get("TELEGRAM_BOT_TOKEN")
+        or os.environ.get("TELEGRAM_TOKEN")
+        or ""
+    ).strip()
+    chat = (
+        os.environ.get("TELEGRAM_CHAT_ID")
+        or os.environ.get("TELEGRAM_CHAT")
+        or ""
+    ).strip()
+    if token and chat:
+        return token, chat
+
+    secrets_path = BASE_DIR / "telegram_secrets.json"
+    if not secrets_path.is_file():
+        return (token or None), (chat or None)
+    try:
+        data = json.loads(secrets_path.read_text(encoding="utf-8"))
+        token = (token or str(data.get("bot_token", "") or "").strip()) or None
+        chat = (chat or str(data.get("chat_id", "") or "").strip()) or None
+        return token, chat
+    except Exception as e:
+        print(f"[WARN] Could not read telegram_secrets.json: {e}")
+        return (token or None), (chat or None)
+
+
+_tg_token, _tg_chat = _eos60d_telegram_credentials()
+
+# Telemetry setup — Telegram optional unless token + chat id are configured (env or telegram_secrets.json)
 telemetry = Telemetry(
     booth_id="Stanford booth",
-    telegram_token=os.environ.get("TELEGRAM_BOT_TOKEN"),
-    telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
+    telegram_token=_tg_token,
+    telegram_chat_id=_tg_chat,
     roll_warn_1=143,
     roll_warn_2=147,
 )
+
+if not _tg_token or not _tg_chat:
+    print(
+        "[Telemetry] Telegram disabled: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID, "
+        "or add telegram_secrets.json (see telegram_secrets.example.json)."
+    )
 
 telemetry.install_crash_hook()
 START_TIME = time.time()
