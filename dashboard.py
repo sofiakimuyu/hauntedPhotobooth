@@ -7,6 +7,7 @@ Then open http://<booth-ip>:5001 on any device on the same WiFi.
 """
 
 import threading
+import socket
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template_string
@@ -74,6 +75,24 @@ def api_stats_date(date_str):
         }), 200
 
 
+def _get_network_ips():
+    """Get all available network IPs for the dashboard."""
+    ips = []
+    try:
+        # Try to get all network interfaces
+        hostname = socket.gethostname()
+        all_ips = socket.gethostbyname_ex(hostname)[2]
+        ips.extend([ip for ip in all_ips if not ip.startswith('127.')])
+    except Exception:
+        pass
+    
+    # Also try localhost
+    if not ips:
+        ips = ['127.0.0.1']
+    
+    return list(set(ips))
+
+
 def run_dashboard(host="0.0.0.0", port=5001, debug=False):
     """
     Launch the dashboard in a background thread so it doesn't
@@ -88,9 +107,21 @@ def run_dashboard(host="0.0.0.0", port=5001, debug=False):
         daemon=True
     )
     t.start()
-    print(f"[Dashboard] Live at http://0.0.0.0:{port}  (open on phone via LAN IP)")
+    
+    # Print connection info
+    network_ips = _get_network_ips()
+    print(f"[Dashboard] Server started on port {port}")
+    print(f"[Dashboard] Access from any device (same network or not):")
+    for ip in network_ips:
+        print(f"[Dashboard]   → http://{ip}:{port}")
+    print(f"[Dashboard] Dashboard will auto-reconnect when booth comes back online.")
+
 
 
 if __name__ == "__main__":
     # Standalone mode — run directly with: python dashboard.py
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    
+    run_dashboard(host="0.0.0.0", port=5001, debug=False)

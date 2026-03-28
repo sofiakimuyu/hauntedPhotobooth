@@ -842,9 +842,18 @@ async function loadDayDetail(dateStr) {
   }
 }
 
-// Auto-refresh every 30s
+// Initialize UI and start refreshing
 initCharts();
-loadStats();
+
+// Show offline state initially, then try to load
+document.getElementById('offlineState').classList.add('active');
+document.getElementById('offlineStatusText').textContent = 'Initializing...';
+
+
+// Try first load after a short delay to ensure page is rendered
+setTimeout(() => loadStats(), 100);
+
+// Auto-refresh every 30s
 setInterval(loadStats, 30000);
 </script>
 </body>
