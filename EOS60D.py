@@ -1072,15 +1072,57 @@ class PhotoBoothUI:
     def _do_touch_scroll(self, event):
         self.template_canvas.scan_dragto(event.x, event.y, gain=1)
 
+    def _prepare_template_overlay_message(self) -> tuple[int, int]:
+        """Disable finger scroll and scrollbar; scrollregion exactly matches canvas (no extra scroll)."""
+        self.template_canvas.unbind("<ButtonPress-1>")
+        self.template_canvas.unbind("<B1-Motion>")
+        self.template_scrollbar.pack_forget()
+        self.template_frame.update_idletasks()
+        self.root.update_idletasks()
+        self.root.update()
+        cw = self.template_canvas.winfo_width()
+        ch = self.template_canvas.winfo_height()
+        if cw < 20 or ch < 20:
+            self.template_frame.update()
+            self.root.update()
+            cw = self.template_canvas.winfo_width()
+            ch = self.template_canvas.winfo_height()
+        # Must not use screen size here — a scrollregion larger than the widget enables scrolling.
+        cw = max(cw, 1)
+        ch = max(ch, 1)
+        self.template_canvas.configure(scrollregion=(0, 0, cw, ch))
+        self.template_canvas.yview_moveto(0)
+        self.template_canvas.xview_moveto(0)
+        self._template_overlay_cw = cw
+        self._template_overlay_ch = ch
+        return cw, ch
+
+    def _place_template_status_centered(self, cw: int, ch: int):
+        self.template_canvas.coords(self.template_status_item, cw // 2, ch // 2)
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            width=max(320, int(cw * 0.85)),
+        )
+
+    def _restore_template_scroll_chrome(self):
+        """Show scrollbar again after a fullscreen overlay (printing / done)."""
+        try:
+            self.template_scrollbar.pack_info()
+        except tk.TclError:
+            self.template_scrollbar.pack(side="right", fill="y")
+
     def show_template_picker_screen(self):
         self.clear_screens()
         self.template_frame.pack(expand=True, fill="both")
+
+        self._restore_template_scroll_chrome()
 
         # Reset status and preview
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="hidden",
-            text=""
+            text="",
+            width=0,
         )
         self.template_canvas.itemconfig(
             self.template_preview_item,
@@ -1109,7 +1151,8 @@ class PhotoBoothUI:
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="hidden",
-            text=""
+            text="",
+            width=0,
         )
 
         # Load templates (PNG + JSON pairs)
@@ -1287,10 +1330,13 @@ class PhotoBoothUI:
         )
 
     def show_printing_message(self):
+        cw, ch = self._prepare_template_overlay_message()
+        self._place_template_status_centered(cw, ch)
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
-            text="Printing your photos...\nPlease wait!"
+            text="Printing your photos...\nPlease wait!",
+            fill="black",
         )
         self.template_canvas.tag_raise(self.template_status_item)
         self.root.update_idletasks()
@@ -1342,7 +1388,7 @@ class PhotoBoothUI:
         except Exception as e:
             print(f"Failed to log session_completed: {e}")
 
-        PRINT_TIME_MS = 15000  # adjust if needed
+        PRINT_TIME_MS = 20000  # adjust if needed
 
         self.root.after(
             PRINT_TIME_MS,
@@ -1350,19 +1396,25 @@ class PhotoBoothUI:
         )
 
     def _show_print_failed(self):
+        cw, ch = self._prepare_template_overlay_message()
+        self._place_template_status_centered(cw, ch)
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
-            text="Print failed.\nReturning to start."
+            text="Print failed.\nReturning to start.",
+            fill="black",
         )
         self.template_canvas.tag_raise(self.template_status_item)
         self.root.after(4000, self.cleanup_session_files_and_return)
 
     def _show_print_done(self):
+        cw, ch = self._prepare_template_overlay_message()
+        self._place_template_status_centered(cw, ch)
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
-            text="Done Printing! Collect Your Photos Outside!"
+            text="Done Printing! Collect Your Photos Outside!",
+            fill="black",
         )
         self.template_canvas.tag_raise(self.template_status_item)
         self.root.after(12000, self.cleanup_session_files_and_return)
