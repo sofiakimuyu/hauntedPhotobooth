@@ -19,7 +19,6 @@ import time
 import subprocess
 import shutil
 from tempfile import NamedTemporaryFile
-from datetime import datetime
 from analytics import log_print
 from dashboard import run_dashboard
 import signal
@@ -36,23 +35,18 @@ TEMPLATES_DIR = BASE_DIR / "PhotoboothTemplates"
 # No preview for this camera
 HAS_PREVIEW = False
 
-# Telemetry setup
+# Telemetry setup (optional: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
 telemetry = Telemetry(
     booth_id="Stanford booth",
-    telegram_token="8537687055:AAHtcNOv2l-QYRmMBvcDNK8idGF2EmUnT7c",
-    telegram_chat_id="8471596713",
+    telegram_token=os.environ.get("TELEGRAM_BOT_TOKEN"),
+    telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
     roll_warn_1=143,
-    roll_warn_2=147
+    roll_warn_2=147,
 )
 
 telemetry.install_crash_hook()
 START_TIME = time.time()
 telemetry.booth_started()
-
-# REMOVE AFTER TESTING
-telemetry.print_result(ok=False, details="test fail")
-telemetry.print_result(ok=True, details="test success")
-telemetry.send_telegram("✅ Booth connected successfully")
 
 # Stripe Setup
 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
@@ -1175,14 +1169,15 @@ class PhotoBoothUI:
             self.template_canvas.tag_raise(self.template_status_item)
             return
 
-        # Telemetry: template chosen
+        # Telemetry + analytics: remember template label for this session
+        template_id = (
+            getattr(tdef, "template_id", None)
+            or getattr(tdef, "name", None)
+            or Path(tdef.png_path).stem
+        )
+        self.selected_template_name = str(template_id)
         try:
-            template_id = (
-                    getattr(tdef, "template_id", None)
-                    or getattr(tdef, "name", None)
-                    or Path(tdef.png_path).stem
-            )
-            telemetry.template_chosen(str(template_id))
+            self.telemetry.template_chosen(self.selected_template_name)
         except Exception:
             pass
 
@@ -1195,25 +1190,21 @@ class PhotoBoothUI:
             text="Composing your strip..."
         )
         self.template_canvas.tag_raise(self.template_status_item)
-        self.root.update()
+        self.root.update_idletasks()
 
         try:
-            # Debug: confirm which captured files are being used
             print("[DEBUG] Captured files going into compose:")
             for i, p in enumerate(self.captured_files[:needed], start=1):
                 print(f"  [{i}] {p}")
 
-            # Compose final strip using the real camera photos
             composed_img = compose(
                 tdef.png_path,
                 tdef.slots,
                 self.captured_files[:needed]
             )
 
-            # Create doubled print-ready strip
             double_img = side_by_side(composed_img)
 
-            # Save doubled strip as JPG for more reliable Windows printing
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_name = f"strip_double_{ts}.jpg"
             out_path = Path(__file__).resolve().parent / out_name
@@ -1224,7 +1215,6 @@ class PhotoBoothUI:
 
             print("[OK] Saved doubled strip:", out_path)
 
-            # Delete original camera captures from computer after strip is saved
             try:
                 delete_files([Path(p) for p in self.captured_files[:needed]])
                 self.captured_files = []
@@ -1242,28 +1232,40 @@ class PhotoBoothUI:
             print("[COMPOSE ERROR]", e)
             return
 
-        # Printing overlay
+        # Show printing message immediately
+        self.show_printing_message()
+
+        # Let Tkinter actually draw the message, then start printing in background
+        import threading
+        self.root.after(
+            100,
+            lambda: threading.Thread(
+                target=lambda: self._print_then_done(str(out_path)),
+                daemon=True
+            ).start()
+        )
+
+    def show_printing_message(self):
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
             text="Printing your photos...\nPlease wait!"
         )
         self.template_canvas.tag_raise(self.template_status_item)
+        self.root.update_idletasks()
 
-        # Start printing in a background thread so UI stays visible
-        import threading
-        threading.Thread(
-            target=lambda: self._print_then_done(str(out_path)),
-            daemon=True
-        ).start()
-
-    def show_printing_message(self):
-        self.template_canvas.itemconfig(
-            self.template_status_item,
-            state="normal",
-            text="Printing your photos..."
-        )
-        self.template_canvas.tag_raise(self.template_status_item)
+    def print_file(self, file_path: str) -> tuple[bool, str]:
+        """
+        Print a composed image on Windows (GDI / default or configured printer).
+        Returns (ok, short details) for telemetry.
+        """
+        try:
+            print_image_windows(file_path, self.printer_name)
+            return True, "sent to printer"
+        except Exception as e:
+            details = str(e).strip()
+            print(f"[PRINT ERROR] {details}")
+            return False, details[:400]
 
     def _print_then_done(self, composed_path: str):
         """
@@ -1279,13 +1281,16 @@ class PhotoBoothUI:
             print(f"Failed to log print result: {e}")
 
         if not ok:
-            self.template_canvas.itemconfig(
-                self.template_status_item,
-                state="normal",
-                text="Print failed.\nReturning to start."
+            self.root.after(
+                0,
+                lambda: self._show_print_failed()
             )
-            self.root.after(4000, self.cleanup_session_files_and_return)
             return
+
+        try:
+            log_print(getattr(self, "selected_template_name", None) or "unknown")
+        except Exception as e:
+            print(f"Failed to log print to analytics DB: {e}")
 
         # Telemetry: successful session + template used
         try:
@@ -1296,24 +1301,30 @@ class PhotoBoothUI:
         except Exception as e:
             print(f"Failed to log session_completed: {e}")
 
+        PRINT_TIME_MS = 15000  # adjust if needed
+
+        self.root.after(
+            PRINT_TIME_MS,
+            self._show_print_done
+        )
+
+    def _show_print_failed(self):
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            state="normal",
+            text="Print failed.\nReturning to start."
+        )
+        self.template_canvas.tag_raise(self.template_status_item)
+        self.root.after(4000, self.cleanup_session_files_and_return)
+
+    def _show_print_done(self):
         self.template_canvas.itemconfig(
             self.template_status_item,
             state="normal",
             text="Done Printing! Collect Your Photos Outside!"
         )
-        self.root.after(5000, self.cleanup_session_files_and_return)
-
-    def print_file(self, file_path: str) -> tuple[bool, str]:
-        try:
-            with Image.open(file_path) as img:
-                print_pil_image(img, self.printer_name)
-            log_print(self.current_template)
-            return True, "Printed successfully"
-
-        except Exception as e:
-            details = str(e).strip()
-            print(f"[PRINT ERROR] {details}")
-            return False, details[:400]
+        self.template_canvas.tag_raise(self.template_status_item)
+        self.root.after(12000, self.cleanup_session_files_and_return)
 
     def shutdown_booth(self):
         if getattr(self, "_is_shutting_down", False):

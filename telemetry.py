@@ -28,16 +28,16 @@ class Telemetry:
 
     def __init__(
         self,
-        booth_id: "Stanford booth",
-        telegram_token="8537687055: AAHtcNOv2l - QYRmMBvcDNK8idGF2EmUnT7c",
-        telegram_chat_id = "8471596713",
+        booth_id: str = "Stanford booth",
+        telegram_token: Optional[str] = None,
+        telegram_chat_id: Optional[str] = None,
         data_dir: str = "telemetry",
         roll_warn_1: int = 143,
         roll_warn_2: int = 147,
     ):
         self.booth_id = booth_id
-        self.telegram_token = telegram_token
-        self.telegram_chat_id = str(telegram_chat_id)
+        self.telegram_token = (telegram_token or "").strip()
+        self.telegram_chat_id = str(telegram_chat_id or "").strip()
 
         self.roll_warn_1 = int(roll_warn_1)
         self.roll_warn_2 = int(roll_warn_2)

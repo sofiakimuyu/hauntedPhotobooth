@@ -6,14 +6,16 @@ Run this alongside your photobooth app:
 Then open http://<booth-ip>:5001 on any device on the same WiFi.
 """
 
-import json
 import threading
+from pathlib import Path
+
 from flask import Flask, jsonify, render_template_string
 from analytics import get_stats
 
+_BASE = Path(__file__).resolve().parent
 app = Flask(__name__)
 
-DASHBOARD_HTML = open("dashboard.html").read()
+DASHBOARD_HTML = (_BASE / "dashboard.html").read_text(encoding="utf-8")
 
 
 @app.route("/")
