@@ -31,6 +31,7 @@ import traceback
 import subprocess
 import platform
 from telemetry import Telemetry
+from tempfile import NamedTemporaryFile
 import glob
 import subprocess
 from dataclasses import dataclass
@@ -1058,24 +1059,11 @@ class PhotoBoothUI:
 
         print("[OK] Saved doubled strip:", out_path)
 
-        # --- 3. Send to printer (Windows PC) ---
-        try:
-            print_image_windows(self.last_composed_strip, self.printer_name)
-        except Exception as e:
-            print("[WARN] Printing failed:", e)
-
+        # Hide preview and proceed directly to print
         self.template_canvas.itemconfig(self.template_preview_item, state="hidden")
 
-        # Printing overlay
-        self.template_canvas.itemconfig(
-            self.template_status_item,
-            state="normal",
-            text="Printing your photos!"
-        )
-        self.template_canvas.tag_raise(self.template_status_item)
-
-        # Print then return
-        self.root.after(5000, lambda: self._print_then_done(out_path))
+        # Print immediately (no delay)
+        self._print_then_done(out_path)
 
     def show_printing_message(self):
         self.template_canvas.itemconfig(
@@ -1086,7 +1074,16 @@ class PhotoBoothUI:
         self.template_canvas.tag_raise(self.template_status_item)
 
     def _print_then_done(self, composed_path: str):
-        # Try to print
+        # Show printing status immediately
+        self.template_canvas.itemconfig(
+            self.template_status_item,
+            state="normal",
+            text="Printing your photos..."
+        )
+        self.template_canvas.tag_raise(self.template_status_item)
+        self.template_canvas.update_idletasks()
+
+        # Try to print (synchronous)
         ok, details = self.print_file(composed_path)
 
         # ✅ TELEMETRY: count prints (lifetime + daily) + paper roll warnings/reset
@@ -1104,41 +1101,107 @@ class PhotoBoothUI:
             self.root.after(4000, self.cleanup_session_files_and_return)
             return
 
-        self.template_canvas.itemconfig(self.template_status_item, state="normal", text="Done!")
-        self.root.after(2000, self.cleanup_session_files_and_return)
+        self.template_canvas.itemconfig(self.template_status_item, state="normal", text="Done ✓")
+        self.root.after(2500, self.cleanup_session_files_and_return)
 
     def print_file(self, file_path: str) -> tuple[bool, str]:
         """
-        macOS print via `lp`.
-        If you set self.printer_name, it will target that printer.
+        Print a file using the appropriate method for the current OS.
+        - Windows: uses win32print/win32ui (requires pywin32)
+        - macOS/Linux: uses `lp` command
 
         Returns:
             (ok, details)
             - ok: True if the job was queued successfully
             - details: stderr/stdout or exception string (trimmed), useful for telemetry
         """
+        if platform.system() == "Windows":
+            return self._print_file_windows(file_path)
+        else:
+            return self._print_file_unix(file_path)
+
+    def _print_file_windows(self, file_path: str) -> tuple[bool, str]:
+        """Print on Windows using win32print/win32ui (professional printers like DNPQW410)."""
+        try:
+            import win32print
+            import win32ui
+            from PIL import Image, ImageWin
+
+            file_path_resolved = str(Path(file_path).resolve())
+            if not Path(file_path_resolved).exists():
+                return False, f"File not found: {file_path_resolved}"
+
+            # Use specified printer or default
+            if self.printer_name:
+                printer_name = self.printer_name
+            else:
+                printer_name = win32print.GetDefaultPrinter()
+
+            img = Image.open(file_path_resolved).convert("RGB")
+            hdc = win32ui.CreateDC()
+            hdc.CreatePrinterDC(printer_name)
+
+            try:
+                printable_w = hdc.GetDeviceCaps(8)   # HORZRES
+                printable_h = hdc.GetDeviceCaps(10)  # VERTRES
+
+                img_w, img_h = img.size
+                scale = min(printable_w / img_w, printable_h / img_h)
+                draw_w = int(img_w * scale)
+                draw_h = int(img_h * scale)
+
+                x1 = (printable_w - draw_w) // 2
+                y1 = (printable_h - draw_h) // 2
+                x2 = x1 + draw_w
+                y2 = y1 + draw_h
+
+                hdc.StartDoc(Path(file_path_resolved).name)
+                hdc.StartPage()
+
+                dib = ImageWin.Dib(img)
+                dib.draw(hdc.GetHandleOutput(), (x1, y1, x2, y2))
+
+                hdc.EndPage()
+                hdc.EndDoc()
+
+                print(f"[PRINT] Windows: sent to printer '{printer_name}'")
+                return True, f"Sent to printer: {printer_name}"
+
+            finally:
+                hdc.DeleteDC()
+
+        except ImportError as e:
+            msg = "pywin32 not installed; run: pip install pywin32"
+            print(f"[PRINT ERROR] {msg}")
+            return False, msg
+        except Exception as e:
+            details = str(e).strip()
+            print(f"[PRINT ERROR] Windows: {details}")
+            return False, details[:400]
+
+    def _print_file_unix(self, file_path: str) -> tuple[bool, str]:
+        """Print on macOS/Linux using the `lp` command."""
         try:
             cmd = ["lp"]
             if self.printer_name:
                 cmd += ["-d", self.printer_name]
-            cmd.append(file_path)
+            cmd.append(str(file_path))
 
-            # This queues the job; it does not guarantee paper came out.
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-
             details = (result.stdout or "").strip()
-            return True, details[:400]  # keep it short
+            print(f"[PRINT] macOS/Linux: job queued successfully")
+            return True, details[:400]
 
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or "").strip() if hasattr(e, "stderr") else ""
             stdout = (e.stdout or "").strip() if hasattr(e, "stdout") else ""
             details = (stderr or stdout or str(e)).strip()
-            print(f"[PRINT ERROR] {details}")
+            print(f"[PRINT ERROR] Unix: {details}")
             return False, details[:400]
 
         except Exception as e:
             details = str(e).strip()
-            print(f"[PRINT ERROR] {details}")
+            print(f"[PRINT ERROR] Unix: {details}")
             return False, details[:400]
 
     def cleanup_session_files_and_return(self):

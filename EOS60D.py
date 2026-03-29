@@ -239,31 +239,51 @@ def print_image_windows(file_path: str, printer_name: str | None = None):
     from PIL import Image, ImageWin
 
     file_path = str(Path(file_path).resolve())
+    print(f"[PRINT] Attempting to print file: {file_path}")
     if not Path(file_path).exists():
         raise FileNotFoundError(f"Print file not found: {file_path}")
 
     if not printer_name:
         printer_name = win32print.GetDefaultPrinter()
+        print(f"[PRINT] Using default printer: {printer_name}")
+    else:
+        print(f"[PRINT] Using specified printer: {printer_name}")
+        # Try to validate the printer exists
+        try:
+            printers = [p[2] for p in win32print.EnumPrinters(2)]
+            if printer_name not in printers:
+                print(f"[PRINT] Warning: Printer '{printer_name}' not found in system printers: {printers}")
+                default_printer = win32print.GetDefaultPrinter()
+                print(f"[PRINT] Falling back to default printer: {default_printer}")
+                printer_name = default_printer
+        except Exception as e:
+            print(f"[PRINT] Could not enumerate printers: {e}")
+            # Continue with the specified printer name
 
     img = Image.open(file_path).convert("RGB")
+    print(f"[PRINT] Image loaded, size: {img.size}")
 
     hdc = win32ui.CreateDC()
     hdc.CreatePrinterDC(printer_name)
+    print(f"[PRINT] Created printer DC for: {printer_name}")
 
     try:
         printable_w = hdc.GetDeviceCaps(8)   # HORZRES
         printable_h = hdc.GetDeviceCaps(10)  # VERTRES
+        print(f"[PRINT] Printer resolution: {printable_w}x{printable_h}")
 
         img_w, img_h = img.size
         scale = min(printable_w / img_w, printable_h / img_h)
         draw_w = int(img_w * scale)
         draw_h = int(img_h * scale)
+        print(f"[PRINT] Scaled image to: {draw_w}x{draw_h}")
 
         x1 = (printable_w - draw_w) // 2
         y1 = (printable_h - draw_h) // 2
         x2 = x1 + draw_w
         y2 = y1 + draw_h
 
+        print(f"[PRINT] Starting print job...")
         hdc.StartDoc(Path(file_path).name)
         hdc.StartPage()
 
@@ -272,9 +292,11 @@ def print_image_windows(file_path: str, printer_name: str | None = None):
 
         hdc.EndPage()
         hdc.EndDoc()
+        print(f"[PRINT] Print job completed successfully")
 
     finally:
         hdc.DeleteDC()
+        print(f"[PRINT] Cleaned up printer DC")
 
 def print_pil_image(img: Image.Image, printer_name: str | None = None):
     """
@@ -465,7 +487,7 @@ class PhotoBoothUI:
         self.captured_files = []  # stores captured image paths
         self.templates_dir = Path(__file__).resolve().parent / "PhotoboothTemplates"
 
-        self.printer_name = None
+        self.printer_name = "DNPQW410"  # Set to your specific printer name
         self.last_composed_strip = None
 
         # ---- assets ----
@@ -1410,12 +1432,27 @@ class PhotoBoothUI:
         Print a composed image on Windows (GDI / default or configured printer).
         Returns (ok, short details) for telemetry.
         """
+        print(f"[PRINT] Starting print attempt for: {file_path}")
+        print(f"[PRINT] Printer name: {self.printer_name or 'default'}")
+
+        try:
+            # Check if pywin32 is available
+            import win32print
+            import win32ui
+            from PIL import Image, ImageWin
+            print("[PRINT] pywin32 modules imported successfully")
+        except ImportError as e:
+            error_msg = f"pywin32 not installed. Run: pip install pywin32"
+            print(f"[PRINT ERROR] {error_msg}")
+            return False, error_msg
+
         try:
             print_image_windows(file_path, self.printer_name)
-            return True, "sent to printer"
+            print("[PRINT] Print job completed successfully")
+            return True, f"sent to printer: {self.printer_name or 'default'}"
         except Exception as e:
             details = str(e).strip()
-            print(f"[PRINT ERROR] {details}")
+            print(f"[PRINT ERROR] Print failed: {details}")
             return False, details[:400]
 
     def _print_then_done(self, composed_path: str):
