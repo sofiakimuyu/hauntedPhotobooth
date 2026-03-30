@@ -580,6 +580,7 @@
     <div class="chart-wrap">
       <canvas id="dailyChart"></canvas>
     </div>
+    <div id="dailyList" class="recent-list" style="margin-top:12px;"></div>
   </div>
 
   <!-- Recent prints -->
@@ -667,12 +668,50 @@ function rankSymbol(i) {
 
 function fmtTime(isoStr) {
   const d = new Date(isoStr);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'America/Los_Angeles'
+  });
 }
 
 function fmtDate(isoStr) {
   const d = new Date(isoStr + (isoStr.includes('T') ? '' : 'T00:00:00'));
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'America/Los_Angeles'
+  });
+}
+
+function fmtDateLong(isoStr) {
+  const d = new Date(isoStr + (isoStr.includes('T') ? '' : 'T00:00:00'));
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'America/Los_Angeles'
+  });
+}
+
+function fmtDateDay(isoStr) {
+  const d = new Date(isoStr + (isoStr.includes('T') ? '' : 'T00:00:00'));
+  return d.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'America/Los_Angeles'
+  });
+}
+
+function fmtNowPST() {
+  return new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone: 'America/Los_Angeles'
+  }) + ' PST';
 }
 
 async function loadStats() {
@@ -701,8 +740,8 @@ async function loadStats() {
     // Hero
     document.getElementById('todayCount').textContent = data.today;
     document.getElementById('totalCount').textContent = data.total;
-    document.getElementById('todayDate').textContent = new Date().toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-    document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('todayDate').textContent = fmtDateDay(new Date().toISOString().slice(0,10));
+    document.getElementById('lastUpdated').textContent = 'Updated ' + fmtNowPST();
 
     // Hourly chart
     const allHours = Array.from({length: 24}, (_, i) => String(i).padStart(2,'0'));
@@ -735,6 +774,22 @@ async function loadStats() {
     dailyChart.data.labels = data.daily_last_30.map(d => fmtDate(d.day));
     dailyChart.data.datasets[0].data = data.daily_last_30.map(d => d.count);
     dailyChart.update('none');
+
+    // Daily list (clickable alternative to chart click)
+    const dailyList = document.getElementById('dailyList');
+    if (!data.daily_last_30.length) {
+      dailyList.innerHTML = '<div class="empty">No daily data yet.</div>';
+    } else {
+      dailyList.innerHTML = data.daily_last_30.map(d => `
+        <div class="recent-item" style="cursor:pointer;" onclick="loadDayDetail('${d.day}')">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="dot"></div>
+            <div class="recent-template">${fmtDate(d.day)}</div>
+          </div>
+          <div class="recent-time">${d.count}</div>
+        </div>
+      `).join('');
+    }
 
     // Recent
     const rList = document.getElementById('recentList');
@@ -782,7 +837,7 @@ async function loadDayDetail(dateStr) {
     }
 
     // Header
-    document.getElementById('dayDetailTitle').textContent = `${new Date(dateStr + 'T00:00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    document.getElementById('dayDetailTitle').textContent = fmtDateLong(dateStr);
     document.getElementById('dayDetailCount').textContent = data.count;
 
     // Find peak hour
