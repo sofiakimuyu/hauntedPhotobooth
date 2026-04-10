@@ -1284,7 +1284,7 @@ class PhotoBoothUI:
         screen_w = self.root.winfo_screenwidth()
         start_y = 140
         pad = 30
-        cols = 3
+        cols = 4
 
         thumb_w = int((screen_w - pad * (cols + 1)) / cols)
         thumb_h = int(thumb_w * 1.2)
