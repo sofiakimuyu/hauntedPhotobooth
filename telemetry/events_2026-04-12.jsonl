@@ -1,0 +1,32 @@
+{"ts": "2026-04-12T23:01:17", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:01:17", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:01:17", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:01:22", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 30}}
+{"ts": "2026-04-12T23:01:29", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-04-12T23:02:38", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:02:38", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:02:38", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:02:40", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 31}}
+{"ts": "2026-04-12T23:02:43", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-04-12T23:03:16", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:03:16", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:03:16", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:03:17", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 32}}
+{"ts": "2026-04-12T23:03:20", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-04-12T23:05:22", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:05:22", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:05:22", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:05:24", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 33}}
+{"ts": "2026-04-12T23:05:27", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-04-12T23:07:33", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:07:33", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:07:33", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:07:34", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 34}}
+{"ts": "2026-04-12T23:08:10", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:08:10", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:08:10", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:08:11", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 35}}
+{"ts": "2026-04-12T23:12:41", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-12T23:12:41", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
+{"ts": "2026-04-12T23:12:41", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
+{"ts": "2026-04-12T23:12:42", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 36}}

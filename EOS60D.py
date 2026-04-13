@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import messagebox
 import json
 import stripe
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps, ImageEnhance
 from pathlib import Path
 import os
 import traceback
@@ -23,6 +23,7 @@ from analytics import log_print
 from dashboard import run_dashboard
 import signal
 import sys
+import numpy as np
 
 # where store camera photos on the PC
 INCOMING_DIR = Path(r"C:\photoboothphotos\incoming")
@@ -120,7 +121,7 @@ class TemplateDef:
 def to_wsl_path(path: Path) -> str:
     """
     Convert a Windows path like:
-        C:\photobooth\incoming\img.jpg
+        C:\\photobooth\\incoming\\img.jpg
     into a WSL path like:
         /mnt/c/photobooth/incoming/img.jpg
     """
@@ -413,7 +414,40 @@ def cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
     return img.crop((left, top, left + target_w, top + target_h))
 
 
-def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -> Image.Image:
+def apply_bw_filter(img: Image.Image) -> Image.Image:
+    """
+    Apply black and white filter with specific adjustments.
+    """
+    # Convert to grayscale
+    bw = ImageOps.grayscale(img)
+
+    # Increase contrast a bit
+    bw = ImageEnhance.Contrast(bw).enhance(2.0)
+
+    # Slight brightness lift
+    bw = ImageEnhance.Brightness(bw).enhance(.9)
+
+    # Back to RGB so we can tint and add grain
+    bw_rgb = bw.convert("RGB")
+
+    # Slight warm tone
+    np_img = np.array(bw_rgb).astype(np.float32)
+    np_img[..., 0] *= 1.2
+    np_img[..., 1] *= 1.08
+    np_img = np.clip(np_img, 0, 255)
+
+    # shadow lift / matte blacks)
+    np_img = np_img * 0.9 + 25
+
+    # Add subtle grain
+    noise = np.random.normal(0, 10, np_img.shape)
+    np_img += noise
+    np_img = np.clip(np_img, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(np_img)
+
+
+def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str], filter_choice: str = "color") -> Image.Image:
     """
     Fill a template background with the 4 captured photos in slot order.
     Returns one final composed PIL image.
@@ -440,6 +474,10 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str]) -
 
         with Image.open(photo_path) as im:
             img = im.convert("RGBA")
+
+        # Apply black and white filter if selected
+        if filter_choice == "bw":
+            img = apply_bw_filter(img)
 
         if slot.rotation:
             img = img.rotate(slot.rotation, expand=True)
@@ -482,6 +520,7 @@ class PhotoBoothUI:
         self.is_running_sequence = False
         self.photo_index = 1
         self.total_photos = 4
+        self.filter_choice = "color"  # "color" or "bw"
 
         # ---- capture / printing ----
         self.captured_files = []  # stores captured image paths
@@ -519,6 +558,7 @@ class PhotoBoothUI:
         # ---- build screens ----
         self.build_welcome_screen()
         self.build_capture_screen()
+        self.build_filter_screen()
         self.build_template_picker_screen()
 
         # Staff: after loading a new paper roll (telemetry roll limit was hit)
@@ -763,6 +803,59 @@ class PhotoBoothUI:
             state="hidden"
         )
 
+    def build_filter_screen(self):
+        self.filter_frame = tk.Frame(self.container, bg="black")
+
+        self.filter_canvas = tk.Canvas(
+            self.filter_frame,
+            bg="black",
+            highlightthickness=0,
+            borderwidth=0
+        )
+        self.filter_canvas.pack(expand=True, fill="both")
+
+        # Title
+        self.filter_title_item = self.filter_canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            200,
+            text="Choose Your Photo Style",
+            fill="white",
+            font=self.font_title,
+            anchor="center"
+        )
+
+        # Color button
+        self.color_button_item = self.filter_canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            self.root.winfo_screenheight() // 2 - 100,
+            text="Color",
+            fill="white",
+            font=self.font_button,
+            anchor="center"
+        )
+
+        # Black & White button
+        self.bw_button_item = self.filter_canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            self.root.winfo_screenheight() // 2 + 100,
+            text="Black & White",
+            fill="white",
+            font=self.font_button,
+            anchor="center"
+        )
+
+        # Bind clicks
+        self.filter_canvas.tag_bind(
+            self.color_button_item,
+            "<Button-1>",
+            lambda e: self.on_filter_selected("color")
+        )
+        self.filter_canvas.tag_bind(
+            self.bw_button_item,
+            "<Button-1>",
+            lambda e: self.on_filter_selected("bw")
+        )
+
     # -------------------------
     # Screen navigation
     # -------------------------
@@ -779,6 +872,7 @@ class PhotoBoothUI:
         self.is_running_sequence = False
         self.session_paid = False
         self._payment_in_progress = False
+        self.filter_choice = "color"
 
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
@@ -925,6 +1019,30 @@ class PhotoBoothUI:
         self.clear_screens()
         self.capture_frame.pack(expand=True, fill="both")
 
+    def show_filter_screen(self):
+        self.clear_screens()
+        self.filter_frame.pack(expand=True, fill="both")
+
+    def on_filter_selected(self, choice: str):
+        self.filter_choice = choice
+        print(f"[FILTER] Selected: {choice}")
+        self.start_photo_sequence()
+
+    def start_photo_sequence(self):
+        """
+        Start the photo capture sequence after filter selection.
+        """
+        self.show_capture_screen()
+
+        self.photo_index = 1
+        self.total_photos = getattr(self, "total_photos", 4)
+        self.captured_files = []
+
+        self.set_splash(True)
+
+        # After short intro delay, begin first photo
+        self.root.after(1200, self.start_next_photo)
+
     def start_sequence(self):
         """
         Entry point after successful payment.
@@ -953,16 +1071,7 @@ class PhotoBoothUI:
             except Exception:
                 pass
 
-            self.show_capture_screen()
-
-            self.photo_index = 1
-            self.total_photos = getattr(self, "total_photos", 4)
-            self.captured_files = []
-
-            self.set_splash(True)
-
-            # After short intro delay, begin first photo
-            self.root.after(1200, self.start_next_photo)
+            self.show_filter_screen()
 
         except Exception as e:
             print("[ERROR] start_sequence failed:", e)
@@ -1145,6 +1254,16 @@ class PhotoBoothUI:
             state="hidden"
         )
 
+        # Email message at bottom
+        self.template_email_item = self.template_canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            self.root.winfo_screenheight() - 50,
+            text="Have template ideas? Email them to skimuyu@stanford.edu",
+            fill="black",
+            font=self.font_small,
+            anchor="center"
+        )
+
         # Keep refs so Tk does not garbage collect images
         self._template_thumb_refs = []
         self._template_item_to_path = {}
@@ -1223,6 +1342,9 @@ class PhotoBoothUI:
 
         self.render_template_grid()
         self._enable_touch_scroll()
+
+        # Ensure email message is visible
+        self.template_canvas.tag_raise(self.template_email_item)
 
     def render_template_grid(self):
         # Clear old thumbnail canvas items
@@ -1324,7 +1446,9 @@ class PhotoBoothUI:
         self.template_canvas.update_idletasks()
         bbox = self.template_canvas.bbox("all")
         if bbox:
-            self.template_canvas.configure(scrollregion=bbox)
+            # Ensure the scroll region includes the full screen height to show the email message
+            screen_h = self.root.winfo_screenheight()
+            self.template_canvas.configure(scrollregion=(0, 0, bbox[2], max(bbox[3], screen_h)))
         else:
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
 
@@ -1370,7 +1494,8 @@ class PhotoBoothUI:
             composed_img = compose(
                 tdef.png_path,
                 tdef.slots,
-                self.captured_files[:needed]
+                self.captured_files[:needed],
+                self.filter_choice
             )
 
             double_img = side_by_side(composed_img)
