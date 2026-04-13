@@ -814,47 +814,53 @@ class PhotoBoothUI:
         )
         self.filter_canvas.pack(expand=True, fill="both")
 
-        # Title
-        self.filter_title_item = self.filter_canvas.create_text(
-            self.root.winfo_screenwidth() // 2,
-            200,
-            text="Choose Your Photo Style",
-            fill="white",
-            font=self.font_title,
-            anchor="center"
-        )
+        # Background image
+        self.tk_filter_bg = None
+        self.filter_bg_item = None
 
-        # Color button
-        self.color_button_item = self.filter_canvas.create_text(
-            self.root.winfo_screenwidth() // 2,
-            self.root.winfo_screenheight() // 2 - 100,
-            text="Color",
-            fill="white",
-            font=self.font_button,
-            anchor="center"
-        )
-
-        # Black & White button
-        self.bw_button_item = self.filter_canvas.create_text(
-            self.root.winfo_screenwidth() // 2,
-            self.root.winfo_screenheight() // 2 + 100,
-            text="Black & White",
-            fill="white",
-            font=self.font_button,
-            anchor="center"
-        )
-
-        # Bind clicks
-        self.filter_canvas.tag_bind(
-            self.color_button_item,
+        # Bind canvas click to detect left/right tap
+        self.filter_canvas.bind(
             "<Button-1>",
-            lambda e: self.on_filter_selected("color")
+            self._on_filter_canvas_click
         )
-        self.filter_canvas.tag_bind(
-            self.bw_button_item,
-            "<Button-1>",
-            lambda e: self.on_filter_selected("bw")
+
+    def _on_filter_canvas_click(self, event):
+        """Detect left vs right click on filter screen."""
+        screen_w = self.root.winfo_screenwidth()
+        if event.x < screen_w // 2:
+            # Left side: black & white
+            self.on_filter_selected("bw")
+        else:
+            # Right side: color
+            self.on_filter_selected("color")
+
+    def _load_filter_background(self):
+        """Load the stylebackground.png image."""
+        filter_bg_path = os.path.join(
+            os.path.dirname(__file__),
+            "stylebackground.png"
         )
+        if os.path.exists(filter_bg_path):
+            try:
+                img = Image.open(filter_bg_path)
+                img = img.resize(
+                    (self.root.winfo_screenwidth(), self.root.winfo_screenheight()),
+                    Image.LANCZOS
+                )
+                self.tk_filter_bg = ImageTk.PhotoImage(img)
+                if self.filter_bg_item:
+                    self.filter_canvas.delete(self.filter_bg_item)
+                self.filter_bg_item = self.filter_canvas.create_image(
+                    0,
+                    0,
+                    anchor="nw",
+                    image=self.tk_filter_bg
+                )
+                self.filter_canvas.tag_lower(self.filter_bg_item)
+            except Exception as e:
+                print(f"[WARN] Could not load filter background: {e}")
+        else:
+            print(f"[WARN] Filter background not found: {filter_bg_path}")
 
     # -------------------------
     # Screen navigation
@@ -1022,6 +1028,7 @@ class PhotoBoothUI:
     def show_filter_screen(self):
         self.clear_screens()
         self.filter_frame.pack(expand=True, fill="both")
+        self._load_filter_background()
 
     def on_filter_selected(self, choice: str):
         self.filter_choice = choice
@@ -1203,6 +1210,16 @@ class PhotoBoothUI:
     def build_template_picker_screen(self):
         self.template_frame = tk.Frame(self.container, bg="black")
 
+        # Email message label at top (fixed, non-scrolling)
+        self.template_email_label = tk.Label(
+            self.template_frame,
+            text="Have template ideas? Email them to skimuyu@stanford.edu",
+            bg="black",
+            fg="white",
+            font=self.font_small
+        )
+        self.template_email_label.pack(pady=10)
+
         # Container for canvas + scrollbar
         self.template_container = tk.Frame(self.template_frame, bg="black")
         self.template_container.pack(expand=True, fill="both")
@@ -1252,16 +1269,6 @@ class PhotoBoothUI:
             anchor="center",
             image=None,
             state="hidden"
-        )
-
-        # Email message at bottom
-        self.template_email_item = self.template_canvas.create_text(
-            self.root.winfo_screenwidth() // 2,
-            self.root.winfo_screenheight() - 50,
-            text="Have template ideas? Email them to skimuyu@stanford.edu",
-            fill="black",
-            font=self.font_small,
-            anchor="center"
         )
 
         # Keep refs so Tk does not garbage collect images
@@ -1342,9 +1349,6 @@ class PhotoBoothUI:
 
         self.render_template_grid()
         self._enable_touch_scroll()
-
-        # Ensure email message is visible
-        self.template_canvas.tag_raise(self.template_email_item)
 
     def render_template_grid(self):
         # Clear old thumbnail canvas items
@@ -1446,9 +1450,7 @@ class PhotoBoothUI:
         self.template_canvas.update_idletasks()
         bbox = self.template_canvas.bbox("all")
         if bbox:
-            # Ensure the scroll region includes the full screen height to show the email message
-            screen_h = self.root.winfo_screenheight()
-            self.template_canvas.configure(scrollregion=(0, 0, bbox[2], max(bbox[3], screen_h)))
+            self.template_canvas.configure(scrollregion=bbox)
         else:
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
 
