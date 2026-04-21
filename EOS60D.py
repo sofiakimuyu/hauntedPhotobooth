@@ -114,6 +114,7 @@ class TemplateDef:
     json_path: str
     slots: List[Slot]
     size: Tuple[int, int]
+    layer_mode: str = "underlay"
 
 # Define all the important functions we will need later
 
@@ -355,6 +356,7 @@ def load_templates(dir_path) -> list[TemplateDef]:
                 data = json.load(f)
 
             name = data.get("name", key)
+            layer_mode = str(data.get("layer_mode", "") or "").strip().lower()
             slots_raw = data.get("slots") or []
 
             if len(slots_raw) != 4:
@@ -365,13 +367,29 @@ def load_templates(dir_path) -> list[TemplateDef]:
 
             for s in slots_raw:
                 merged = {**defaults, **s}
+
+                w = int(merged["w"])
+                h = int(merged["h"])
+
+                if "cx" in merged and "cy" in merged:
+                    x = int(round(float(merged["cx"]) - w / 2))
+                    y = int(round(float(merged["cy"]) - h / 2))
+                elif "x" in merged and "y" in merged:
+                    x = int(merged["x"])
+                    y = int(merged["y"])
+                else:
+                    raise ValueError(
+                        f"Slot {merged.get('id', '?')} must define either "
+                        f"(x, y) or (cx, cy)"
+                    )
+
                 slots.append(
                     Slot(
                         id=int(merged["id"]),
-                        x=int(merged["x"]),
-                        y=int(merged["y"]),
-                        w=int(merged["w"]),
-                        h=int(merged["h"]),
+                        x=x,
+                        y=y,
+                        w=w,
+                        h=h,
                         rotation=int(merged.get("rotation", 0)),
                     )
                 )
@@ -387,6 +405,7 @@ def load_templates(dir_path) -> list[TemplateDef]:
                     json_path=str(json_path),
                     slots=slots,
                     size=(w, h),
+                    layer_mode=layer_mode,
                 )
             )
 
@@ -447,7 +466,13 @@ def apply_bw_filter(img: Image.Image) -> Image.Image:
     return Image.fromarray(np_img)
 
 
-def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str], filter_choice: str = "color") -> Image.Image:
+def compose(
+    template_png_path: str,
+    slots: List[Slot],
+    photo_paths: List[str],
+    filter_choice: str = "color",
+    layer_mode: str = "underlay",
+) -> Image.Image:
     """
     Fill a template background with the 4 captured photos in slot order.
     Returns one final composed PIL image.
@@ -455,7 +480,7 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str], f
     template_path = Path(template_png_path)
 
     with Image.open(template_path) as im:
-        base = im.convert("RGBA")
+        template_img = im.convert("RGBA")
 
     if len(photo_paths) != 4:
         raise ValueError(f"Expected exactly 4 photo paths, got {len(photo_paths)}.")
@@ -465,6 +490,12 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str], f
         raise ValueError(
             f"Template must define exactly 4 slots, got {len(slots_sorted)}."
         )
+
+    is_overlay = str(layer_mode or "").strip().lower() == "overlay"
+    if is_overlay:
+        base = Image.new("RGBA", template_img.size, (255, 255, 255, 0))
+    else:
+        base = template_img.copy()
 
     for slot, photo_path in zip(slots_sorted, photo_paths):
         photo_path = Path(photo_path)
@@ -485,6 +516,9 @@ def compose(template_png_path: str, slots: List[Slot], photo_paths: List[str], f
         fitted = cover_resize(img, slot.w, slot.h).convert("RGBA")
         mask = fitted.getchannel("A")
         base.paste(fitted, (slot.x, slot.y), mask)
+
+    if is_overlay:
+        base.alpha_composite(template_img)
 
     return base
 
@@ -1497,7 +1531,8 @@ class PhotoBoothUI:
                 tdef.png_path,
                 tdef.slots,
                 self.captured_files[:needed],
-                self.filter_choice
+                self.filter_choice,
+                tdef.layer_mode,
             )
 
             double_img = side_by_side(composed_img)

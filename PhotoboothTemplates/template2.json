@@ -1,5 +1,6 @@
 {
   "name": "Template 5",
+  "layer_mode": "overlay",
 
   "defaults": {
     "x": 40,
