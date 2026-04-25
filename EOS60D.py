@@ -755,7 +755,7 @@ class PhotoBoothUI:
                     except Exception:
                         pass
 
-                    ok = self.charge_with_wisepos(amount_cents=50)
+                    ok = self.charge_with_wisepos(amount_cents=424)
 
                 finally:
                     def _finish():
