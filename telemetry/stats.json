@@ -130,14 +130,10 @@
     "out_of_paper": false
   },
   "last_event": {
-    "ts": "2026-04-29T11:40:04",
+    "ts": "2026-04-29T11:44:07",
     "booth_id": "Stanford booth",
-    "type": "crash",
-    "data": {
-      "exc_type": "TclError",
-      "message": "bad pad value \"-8\": must be positive screen distance",
-      "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 2185, in <module>\n    main()\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 2173, in main\n    app = PhotoBoothUI(root, telemetry)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 615, in __init__\n    self.build_code_entry_screen()\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 1001, in build_code_entry_screen\n    self.code_hint_label.pack(pady=(-8, 0))\n  File \"/Library/Frameworks/Python.framework/Versions/3.12/lib/python3.12/tkinter/__init__.py\", line 2453, in pack_configure\n    self.tk.call(\n_tkinter.TclError: bad pad value \"-8\": must be positive screen distance\n"
-    }
+    "type": "booth_stopped",
+    "data": {}
   },
-  "last_heartbeat_at": "2026-04-29T11:40:03"
+  "last_heartbeat_at": "2026-04-29T11:43:58"
 }

@@ -980,7 +980,7 @@ class PhotoBoothUI:
             pady=14,
             cursor="hand2",
         )
-        self.code_enter_button.pack(pady=(0, 6))
+        self.code_enter_button.pack(pady=(0, 2))
 
         self.code_error_label = tk.Label(
             self.code_panel,
@@ -998,7 +998,7 @@ class PhotoBoothUI:
             fg="white",
             font=("Helvetica", 18),
         )
-        self.code_hint_label.pack(pady=(-8, 0))
+        self.code_hint_label.pack(pady=(0, 0))
 
         self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
         self.code_keyboard_frame.pack(pady=(0, 0))
