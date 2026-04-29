@@ -850,14 +850,14 @@ class PhotoBoothUI:
         screen_h = self.root.winfo_screenheight()
 
         self.code_button_rect = self.welcome_canvas.create_rectangle(
-            screen_w - 460, screen_h - 220, screen_w - 240, screen_h - 156,
+            screen_w - 500, screen_h - 180, screen_w - 280, screen_h - 116,
             fill="black",
             outline="white",
             width=2
         )
         self.code_button_text = self.welcome_canvas.create_text(
-            screen_w - 350,
-            screen_h - 188,
+            screen_w - 390,
+            screen_h - 148,
             text="I have a code",
             fill="white",
             font=("Helvetica", 18, "bold"),
@@ -1716,10 +1716,12 @@ class PhotoBoothUI:
         # Grid layout
         screen_w = self.root.winfo_screenwidth()
         start_y = 140
-        pad = 30
+        pad = 18
+        side_margin = 24
+        bottom_scroll_padding = 260
         cols = 4
 
-        thumb_w = int((screen_w - pad * (cols + 1)) / cols)
+        thumb_w = int((screen_w - side_margin * 2 - pad * (cols - 1)) / cols)
         thumb_h = int(thumb_w * 1.2)
 
         # Create thumbnails
@@ -1727,7 +1729,7 @@ class PhotoBoothUI:
             col = idx % cols
             row = idx // cols
 
-            x = pad + col * (thumb_w + pad) + thumb_w // 2
+            x = side_margin + col * (thumb_w + pad) + thumb_w // 2
             y = start_y + row * (thumb_h + pad) + thumb_h // 2
 
             try:
@@ -1757,7 +1759,9 @@ class PhotoBoothUI:
         self.template_canvas.update_idletasks()
         bbox = self.template_canvas.bbox("all")
         if bbox:
-            self.template_canvas.configure(scrollregion=bbox)
+            self.template_canvas.configure(
+                scrollregion=(bbox[0], bbox[1], bbox[2], bbox[3] + bottom_scroll_padding)
+            )
         else:
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
 

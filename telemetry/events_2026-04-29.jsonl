@@ -1,0 +1,5 @@
+{"ts": "2026-04-29T09:54:24", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-29T09:54:24", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 38}}
+{"ts": "2026-04-29T09:55:27", "booth_id": "Stanford booth", "type": "session_started", "data": {}}
+{"ts": "2026-04-29T09:56:03", "booth_id": "Stanford booth", "type": "session_started", "data": {}}
+{"ts": "2026-04-29T09:57:25", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
