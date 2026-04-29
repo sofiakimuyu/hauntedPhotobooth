@@ -944,7 +944,7 @@ class PhotoBoothUI:
             fg="white",
             font=("Helvetica", 44, "bold"),
         )
-        self.code_title_label.pack(pady=(72, 24))
+        self.code_title_label.pack(pady=(36, 16))
 
         self.code_error_var = tk.StringVar(value="")
         self.code_entry_var = tk.StringVar()
@@ -961,7 +961,7 @@ class PhotoBoothUI:
             highlightcolor="white",
             bd=0,
         )
-        self.code_entry.pack(pady=(0, 20), ipadx=12, ipady=18)
+        self.code_entry.pack(pady=(0, 14), ipadx=12, ipady=18)
         self.code_entry.bind("<Return>", self._submit_access_code)
         self.code_entry.bind("<Button-1>", self._focus_code_entry)
         self.code_entry.bind("<FocusIn>", self._focus_code_entry)
@@ -980,7 +980,7 @@ class PhotoBoothUI:
             pady=14,
             cursor="hand2",
         )
-        self.code_enter_button.pack(pady=(0, 12))
+        self.code_enter_button.pack(pady=(0, 6))
 
         self.code_error_label = tk.Label(
             self.code_panel,
@@ -998,10 +998,10 @@ class PhotoBoothUI:
             fg="white",
             font=("Helvetica", 18),
         )
-        self.code_hint_label.pack(pady=(0, 4))
+        self.code_hint_label.pack(pady=(0, 0))
 
         self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
-        self.code_keyboard_frame.pack(pady=(8, 0))
+        self.code_keyboard_frame.pack(pady=(2, 0))
         self.code_keyboard_visible = False
         self._build_code_keyboard()
         self.code_keyboard_frame.pack_forget()
@@ -1089,7 +1089,7 @@ class PhotoBoothUI:
 
     def _show_touch_keyboard(self):
         if not getattr(self, "code_keyboard_visible", False):
-            self.code_keyboard_frame.pack(pady=(8, 0))
+            self.code_keyboard_frame.pack(pady=(2, 0))
             self.code_keyboard_visible = True
 
     def _hide_touch_keyboard(self):
