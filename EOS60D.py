@@ -998,10 +998,10 @@ class PhotoBoothUI:
             fg="white",
             font=("Helvetica", 18),
         )
-        self.code_hint_label.pack(pady=(0, 0))
+        self.code_hint_label.pack(pady=(-8, 0))
 
         self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
-        self.code_keyboard_frame.pack(pady=(2, 0))
+        self.code_keyboard_frame.pack(pady=(0, 0))
         self.code_keyboard_visible = False
         self._build_code_keyboard()
         self.code_keyboard_frame.pack_forget()
@@ -1089,7 +1089,7 @@ class PhotoBoothUI:
 
     def _show_touch_keyboard(self):
         if not getattr(self, "code_keyboard_visible", False):
-            self.code_keyboard_frame.pack(pady=(2, 0))
+            self.code_keyboard_frame.pack(pady=(0, 0))
             self.code_keyboard_visible = True
 
     def _hide_touch_keyboard(self):
