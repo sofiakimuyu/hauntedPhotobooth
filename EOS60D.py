@@ -736,15 +736,28 @@ class PhotoBoothUI:
 
                 if status == "succeeded":
                     pi = stripe.PaymentIntent.retrieve(pi.id)
-                    payment_succeeded = (pi.status == "succeeded")
+                    pi_status = getattr(pi, "status", None)
+                    print(f"[STRIPE] Reader action succeeded. PaymentIntent status: {pi_status}")
                     self.root.after(
                         0,
-                        lambda ok=payment_succeeded, gen=generation, status=pi.status:
-                        self._on_reader_payment_result(gen, ok, status)
+                        lambda gen=generation, status=(pi_status or "succeeded"):
+                        self._on_reader_payment_result(gen, True, status)
                     )
                     return
 
-                if status in ("failed", "canceled"):
+                if status == "failed":
+                    pi = stripe.PaymentIntent.retrieve(pi.id)
+                    pi_status = getattr(pi, "status", None)
+                    print(f"[STRIPE] Reader action failed. PaymentIntent status: {pi_status}")
+                    self.root.after(
+                        0,
+                        lambda gen=generation, status=(pi_status or "failed"):
+                        self._on_reader_payment_result(gen, False, status)
+                    )
+                    return
+
+                if status == "canceled":
+                    print("[STRIPE] Reader action canceled.")
                     self.root.after(
                         0,
                         lambda gen=generation, status=status:
@@ -850,13 +863,13 @@ class PhotoBoothUI:
         screen_h = self.root.winfo_screenheight()
 
         self.code_button_rect = self.welcome_canvas.create_rectangle(
-            screen_w - 500, screen_h - 180, screen_w - 280, screen_h - 116,
+            screen_w - 460, screen_h - 180, screen_w - 240, screen_h - 116,
             fill="black",
             outline="white",
             width=2
         )
         self.code_button_text = self.welcome_canvas.create_text(
-            screen_w - 390,
+            screen_w - 350,
             screen_h - 148,
             text="I have a code",
             fill="white",
@@ -902,11 +915,11 @@ class PhotoBoothUI:
             bd=0,
         )
         self.code_panel.place(
-            relx=0.34,
+            relx=0.28,
             rely=0.5,
             anchor="center",
             width=760,
-            height=560,
+            height=720,
         )
 
         self.code_close_button = tk.Button(
@@ -987,6 +1000,12 @@ class PhotoBoothUI:
         )
         self.code_hint_label.pack()
 
+        self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
+        self.code_keyboard_frame.pack(pady=(24, 0))
+        self.code_keyboard_visible = False
+        self._build_code_keyboard()
+        self.code_keyboard_frame.pack_forget()
+
     def _load_code_background(self):
         if not self.code_bg_path:
             return
@@ -1012,26 +1031,92 @@ class PhotoBoothUI:
         self._show_touch_keyboard()
         return None
 
-    def _show_touch_keyboard(self):
-        if platform.system() != "Windows":
-            return
-
-        keyboard_candidates = [
-            r"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe",
-            "osk.exe",
+    def _build_code_keyboard(self):
+        rows = [
+            list("QWERTYUIOP"),
+            list("ASDFGHJKL"),
+            list("ZXCVBNM"),
         ]
-        for keyboard_cmd in keyboard_candidates:
-            try:
-                subprocess.Popen([keyboard_cmd])
-                return
-            except Exception:
-                continue
+
+        for row_index, chars in enumerate(rows):
+            row_frame = tk.Frame(self.code_keyboard_frame, bg="black")
+            row_frame.pack(pady=4)
+            for ch in chars:
+                btn = tk.Button(
+                    row_frame,
+                    text=ch,
+                    command=lambda value=ch: self._code_keyboard_press(value),
+                    font=("Helvetica", 16, "bold"),
+                    width=3,
+                    bg="#1a1a1a",
+                    fg="white",
+                    activebackground="#2b2b2b",
+                    activeforeground="white",
+                    relief="flat",
+                    padx=4,
+                    pady=8,
+                    cursor="hand2",
+                )
+                btn.pack(side="left", padx=3)
+
+        action_row = tk.Frame(self.code_keyboard_frame, bg="black")
+        action_row.pack(pady=(10, 0))
+
+        buttons = [
+            ("Space", lambda: self._code_keyboard_press(" "), 10),
+            ("Back", self._code_keyboard_backspace, 6),
+            ("Clear", self._code_keyboard_clear, 6),
+            ("Enter", self._submit_access_code, 6),
+        ]
+
+        for label, cmd, width in buttons:
+            btn = tk.Button(
+                action_row,
+                text=label,
+                command=cmd,
+                font=("Helvetica", 15, "bold"),
+                width=width,
+                bg="white" if label == "Enter" else "#1a1a1a",
+                fg="black" if label == "Enter" else "white",
+                activebackground="#f0f0f0" if label == "Enter" else "#2b2b2b",
+                activeforeground="black" if label == "Enter" else "white",
+                relief="flat",
+                padx=6,
+                pady=10,
+                cursor="hand2",
+            )
+            btn.pack(side="left", padx=4)
+
+    def _show_touch_keyboard(self):
+        if not getattr(self, "code_keyboard_visible", False):
+            self.code_keyboard_frame.pack(pady=(24, 0))
+            self.code_keyboard_visible = True
+
+    def _hide_touch_keyboard(self):
+        if getattr(self, "code_keyboard_visible", False):
+            self.code_keyboard_frame.pack_forget()
+            self.code_keyboard_visible = False
+
+    def _code_keyboard_press(self, value: str):
+        current = self.code_entry_var.get()
+        self.code_entry_var.set(current + value)
+        self.code_entry.focus_set()
+
+    def _code_keyboard_backspace(self):
+        current = self.code_entry_var.get()
+        self.code_entry_var.set(current[:-1])
+        self.code_entry.focus_set()
+
+    def _code_keyboard_clear(self):
+        self.code_entry_var.set("")
+        self.code_entry.focus_set()
 
     def _submit_access_code(self, event=None):
         entered_code = (self.code_entry_var.get() or "").strip().casefold()
         if entered_code in self.approved_access_codes:
             self.code_error_var.set("")
             self.code_entry_var.set("")
+            self._hide_touch_keyboard()
             self._code_screen_active = False
             self.session_paid = True
             self._payment_in_progress = False
@@ -1172,6 +1257,7 @@ class PhotoBoothUI:
     def show_welcome_screen(self):
         self._code_screen_active = False
         self._stop_reader_waiting(cancel_reader=True)
+        self._hide_touch_keyboard()
         self.clear_screens()
         self.welcome_frame.pack(expand=True, fill="both")
 
