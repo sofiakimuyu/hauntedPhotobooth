@@ -863,13 +863,13 @@ class PhotoBoothUI:
         screen_h = self.root.winfo_screenheight()
 
         self.code_button_rect = self.welcome_canvas.create_rectangle(
-            screen_w - 420, screen_h - 180, screen_w - 200, screen_h - 116,
+            screen_w - 360, screen_h - 180, screen_w - 140, screen_h - 116,
             fill="black",
             outline="white",
             width=2
         )
         self.code_button_text = self.welcome_canvas.create_text(
-            screen_w - 310,
+            screen_w - 250,
             screen_h - 148,
             text="I have a code",
             fill="white",
@@ -980,7 +980,7 @@ class PhotoBoothUI:
             pady=14,
             cursor="hand2",
         )
-        self.code_enter_button.pack(pady=(0, 18))
+        self.code_enter_button.pack(pady=(0, 12))
 
         self.code_error_label = tk.Label(
             self.code_panel,
@@ -998,10 +998,10 @@ class PhotoBoothUI:
             fg="white",
             font=("Helvetica", 18),
         )
-        self.code_hint_label.pack()
+        self.code_hint_label.pack(pady=(0, 4))
 
         self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
-        self.code_keyboard_frame.pack(pady=(24, 0))
+        self.code_keyboard_frame.pack(pady=(8, 0))
         self.code_keyboard_visible = False
         self._build_code_keyboard()
         self.code_keyboard_frame.pack_forget()
@@ -1089,7 +1089,7 @@ class PhotoBoothUI:
 
     def _show_touch_keyboard(self):
         if not getattr(self, "code_keyboard_visible", False):
-            self.code_keyboard_frame.pack(pady=(24, 0))
+            self.code_keyboard_frame.pack(pady=(8, 0))
             self.code_keyboard_visible = True
 
     def _hide_touch_keyboard(self):
