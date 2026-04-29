@@ -863,13 +863,13 @@ class PhotoBoothUI:
         screen_h = self.root.winfo_screenheight()
 
         self.code_button_rect = self.welcome_canvas.create_rectangle(
-            screen_w - 460, screen_h - 180, screen_w - 240, screen_h - 116,
+            screen_w - 420, screen_h - 180, screen_w - 200, screen_h - 116,
             fill="black",
             outline="white",
             width=2
         )
         self.code_button_text = self.welcome_canvas.create_text(
-            screen_w - 350,
+            screen_w - 310,
             screen_h - 148,
             text="I have a code",
             fill="white",
@@ -918,8 +918,8 @@ class PhotoBoothUI:
             relx=0.28,
             rely=0.5,
             anchor="center",
-            width=760,
-            height=720,
+            width=660,
+            height=620,
         )
 
         self.code_close_button = tk.Button(
@@ -1101,15 +1101,21 @@ class PhotoBoothUI:
         current = self.code_entry_var.get()
         self.code_entry_var.set(current + value)
         self.code_entry.focus_set()
+        self.code_entry.icursor(tk.END)
+        self.code_entry.xview_moveto(1.0)
 
     def _code_keyboard_backspace(self):
         current = self.code_entry_var.get()
         self.code_entry_var.set(current[:-1])
         self.code_entry.focus_set()
+        self.code_entry.icursor(tk.END)
+        self.code_entry.xview_moveto(1.0)
 
     def _code_keyboard_clear(self):
         self.code_entry_var.set("")
         self.code_entry.focus_set()
+        self.code_entry.icursor(0)
+        self.code_entry.xview_moveto(0.0)
 
     def _submit_access_code(self, event=None):
         entered_code = (self.code_entry_var.get() or "").strip().casefold()
