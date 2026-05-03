@@ -565,7 +565,22 @@ class PhotoBoothUI:
             "i love you blair",
             "free for you!",
             "i love you",
+            "debugwarrior"
         }
+        self.one_time_access_codes = {
+            "strikeapose",
+            "saycheez",
+            "flashme",
+            "snapit",
+            "boothie",
+            "oopsie",
+            "strip",
+            "smile",
+            "freeslay",
+            "slay",
+        }
+        self.used_codes_path = BASE_DIR / "used_access_codes.json"
+        self.used_one_time_access_codes = self._load_used_one_time_access_codes()
 
         # ---- capture / printing ----
         self.captured_files = []  # stores captured image paths
@@ -706,18 +721,33 @@ class PhotoBoothUI:
             daemon=True
         ).start()
 
+    def _get_or_create_reader_payment_intent(self):
+        existing_id = getattr(self, "_reader_payment_intent_id", None)
+        if existing_id:
+            try:
+                pi = stripe.PaymentIntent.retrieve(existing_id)
+                pi_status = getattr(pi, "status", None)
+                print(f"[STRIPE] Reusing PaymentIntent {existing_id} with status {pi_status}")
+                if pi_status not in ("succeeded", "canceled"):
+                    return pi
+            except Exception as e:
+                print(f"[STRIPE] Could not reuse PaymentIntent {existing_id}: {e}")
+
+        pi = stripe.PaymentIntent.create(
+            amount=self.session_price_cents,
+            currency="usd",
+            payment_method_types=["card_present"],
+            description="Photobooth session"
+        )
+        print(f"[STRIPE] Created new PaymentIntent {pi.id}")
+        self._reader_payment_intent_id = pi.id
+        return pi
+
     def _reader_wait_loop(self, generation: int):
         try:
-            pi = stripe.PaymentIntent.create(
-                amount=self.session_price_cents,
-                currency="usd",
-                payment_method_types=["card_present"],
-                description="Photobooth session"
-            )
+            pi = self._get_or_create_reader_payment_intent()
             if not self._is_reader_generation_current(generation):
                 return
-
-            self._reader_payment_intent_id = pi.id
 
             stripe.terminal.Reader.process_payment_intent(
                 STRIPE_READER_ID,
@@ -779,11 +809,11 @@ class PhotoBoothUI:
 
         self._reader_should_run = False
         self._payment_in_progress = False
-        self._reader_payment_intent_id = None
         self._reader_generation += 1
 
         if ok:
             self.session_paid = True
+            self._reader_payment_intent_id = None
             self._welcome_tap_enabled = False
             self._set_welcome_subtitle("Paid. Starting...")
             self.root.after(100, self.start_sequence)
@@ -800,7 +830,6 @@ class PhotoBoothUI:
         print(f"[STRIPE] Reader wait error: {message}")
         self._reader_should_run = False
         self._payment_in_progress = False
-        self._reader_payment_intent_id = None
         self._reader_generation += 1
         self._set_welcome_subtitle(self._default_welcome_subtitle())
         self.root.after(1000, self._start_reader_waiting)
@@ -980,7 +1009,7 @@ class PhotoBoothUI:
             pady=14,
             cursor="hand2",
         )
-        self.code_enter_button.pack(pady=(0, 2))
+        self.code_enter_button.pack(pady=(0, 0))
 
         self.code_error_label = tk.Label(
             self.code_panel,
@@ -989,16 +1018,7 @@ class PhotoBoothUI:
             fg="#ff6b6b",
             font=("Helvetica", 22, "bold"),
         )
-        self.code_error_label.pack(pady=(0, 12))
-
-        self.code_hint_label = tk.Label(
-            self.code_panel,
-            text="Tap the box, type your code, and press Enter.",
-            bg="black",
-            fg="white",
-            font=("Helvetica", 18),
-        )
-        self.code_hint_label.pack(pady=(0, 0))
+        self.code_error_label.pack(pady=(0, 6))
 
         self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
         self.code_keyboard_frame.pack(pady=(0, 0))
@@ -1117,18 +1137,62 @@ class PhotoBoothUI:
         self.code_entry.icursor(0)
         self.code_entry.xview_moveto(0.0)
 
+    def _load_used_one_time_access_codes(self) -> set[str]:
+        if not self.used_codes_path.is_file():
+            return set()
+        try:
+            data = json.loads(self.used_codes_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"[WARN] Could not read used access codes: {e}")
+            return set()
+
+        if not isinstance(data, list):
+            return set()
+        return {
+            str(code).strip().casefold()
+            for code in data
+            if str(code).strip()
+        }
+
+    def _save_used_one_time_access_codes(self):
+        try:
+            self.used_codes_path.write_text(
+                json.dumps(sorted(self.used_one_time_access_codes), indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            print(f"[WARN] Could not save used access codes: {e}")
+
+    def _grant_code_access(self):
+        self.code_error_var.set("")
+        self.code_entry_var.set("")
+        self._hide_touch_keyboard()
+        self._code_screen_active = False
+        self.session_paid = True
+        self._payment_in_progress = False
+        self._welcome_tap_enabled = False
+        self.start_sequence()
+        return "break"
+
     def _submit_access_code(self, event=None):
         entered_code = (self.code_entry_var.get() or "").strip().casefold()
+        if entered_code in self.one_time_access_codes:
+            if entered_code in self.used_one_time_access_codes:
+                self.code_error_var.set("the code has already been used")
+                try:
+                    self.code_entry.selection_range(0, tk.END)
+                    self.code_entry.focus_set()
+                except Exception:
+                    pass
+                self._show_touch_keyboard()
+                return "break"
+
+            self.used_one_time_access_codes.add(entered_code)
+            self._save_used_one_time_access_codes()
+            return self._grant_code_access()
+
         if entered_code in self.approved_access_codes:
-            self.code_error_var.set("")
-            self.code_entry_var.set("")
-            self._hide_touch_keyboard()
-            self._code_screen_active = False
-            self.session_paid = True
-            self._payment_in_progress = False
-            self._welcome_tap_enabled = False
-            self.start_sequence()
-            return "break"
+            return self._grant_code_access()
 
         self.code_error_var.set("error code not recognized")
         try:

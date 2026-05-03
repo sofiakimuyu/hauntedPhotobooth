@@ -130,10 +130,10 @@
     "out_of_paper": false
   },
   "last_event": {
-    "ts": "2026-04-29T11:44:07",
+    "ts": "2026-04-29T16:17:10",
     "booth_id": "Stanford booth",
     "type": "booth_stopped",
     "data": {}
   },
-  "last_heartbeat_at": "2026-04-29T11:43:58"
+  "last_heartbeat_at": "2026-04-29T16:16:52"
 }

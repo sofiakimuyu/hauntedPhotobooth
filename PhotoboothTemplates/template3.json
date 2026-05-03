@@ -1,5 +1,5 @@
 {
-"name": "film strip",
+"name": "Film Strip",
   "slots": [
     { "id": 1, "x": 70, "y": 12, "w": 460, "h": 435, "rotation": 0 },
     { "id": 2, "x": 70, "y": 459, "w": 460, "h": 435, "rotation": 0 },

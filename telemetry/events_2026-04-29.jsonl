@@ -9,3 +9,6 @@
 {"ts": "2026-04-29T11:43:58", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
 {"ts": "2026-04-29T11:43:58", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 38}}
 {"ts": "2026-04-29T11:44:07", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
+{"ts": "2026-04-29T16:16:51", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
+{"ts": "2026-04-29T16:16:52", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 38}}
+{"ts": "2026-04-29T16:17:10", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}
