@@ -687,10 +687,28 @@ class PhotoBoothUI:
         except Exception:
             pass
 
-    def _stop_reader_waiting(self, *, cancel_reader: bool):
+    def _clear_reader_payment_intent(self):
+        self._reader_payment_intent_id = None
+
+    def _get_reader_payment_intent_status(self, payment_intent_id: str | None = None):
+        target_id = payment_intent_id or getattr(self, "_reader_payment_intent_id", None)
+        if not target_id:
+            return None
+
+        try:
+            pi = stripe.PaymentIntent.retrieve(target_id)
+            status = getattr(pi, "status", None)
+            print(f"[STRIPE] PaymentIntent {target_id} status is {status}")
+            return status
+        except Exception as e:
+            print(f"[STRIPE] Could not retrieve PaymentIntent {target_id}: {e}")
+            return None
+
+    def _stop_reader_waiting(self, *, cancel_reader: bool, clear_payment_intent: bool = False):
         self._reader_should_run = False
         self._payment_in_progress = False
-        self._reader_payment_intent_id = None
+        if clear_payment_intent:
+            self._clear_reader_payment_intent()
         self._reader_generation += 1
         if cancel_reader:
             threading.Thread(
@@ -728,7 +746,7 @@ class PhotoBoothUI:
                 pi = stripe.PaymentIntent.retrieve(existing_id)
                 pi_status = getattr(pi, "status", None)
                 print(f"[STRIPE] Reusing PaymentIntent {existing_id} with status {pi_status}")
-                if pi_status not in ("succeeded", "canceled"):
+                if pi_status != "canceled":
                     return pi
             except Exception as e:
                 print(f"[STRIPE] Could not reuse PaymentIntent {existing_id}: {e}")
@@ -744,9 +762,19 @@ class PhotoBoothUI:
         return pi
 
     def _reader_wait_loop(self, generation: int):
+        pi = None
         try:
             pi = self._get_or_create_reader_payment_intent()
             if not self._is_reader_generation_current(generation):
+                return
+
+            pi_status = getattr(pi, "status", None)
+            if pi_status == "succeeded":
+                print(f"[STRIPE] PaymentIntent {pi.id} already succeeded; starting booth.")
+                self.root.after(
+                    0,
+                    lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
+                )
                 return
 
             stripe.terminal.Reader.process_payment_intent(
@@ -765,19 +793,17 @@ class PhotoBoothUI:
                 status = getattr(action, "status", None)
 
                 if status == "succeeded":
-                    pi = stripe.PaymentIntent.retrieve(pi.id)
-                    pi_status = getattr(pi, "status", None)
+                    pi_status = self._get_reader_payment_intent_status(pi.id)
                     print(f"[STRIPE] Reader action succeeded. PaymentIntent status: {pi_status}")
-                    self.root.after(
-                        0,
-                        lambda gen=generation, status=(pi_status or "succeeded"):
-                        self._on_reader_payment_result(gen, True, status)
-                    )
-                    return
+                    if pi_status == "succeeded":
+                        self.root.after(
+                            0,
+                            lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
+                        )
+                        return
 
                 if status == "failed":
-                    pi = stripe.PaymentIntent.retrieve(pi.id)
-                    pi_status = getattr(pi, "status", None)
+                    pi_status = self._get_reader_payment_intent_status(pi.id)
                     print(f"[STRIPE] Reader action failed. PaymentIntent status: {pi_status}")
                     self.root.after(
                         0,
@@ -798,6 +824,14 @@ class PhotoBoothUI:
                 time.sleep(0.5)
 
         except Exception as e:
+            pi_status = self._get_reader_payment_intent_status(getattr(pi, "id", None))
+            if pi_status == "succeeded":
+                print("[STRIPE] Reader command errored, but payment succeeded; starting booth.")
+                self.root.after(
+                    0,
+                    lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
+                )
+                return
             self.root.after(
                 0,
                 lambda gen=generation, msg=str(e): self._on_reader_payment_error(gen, msg)
@@ -813,7 +847,6 @@ class PhotoBoothUI:
 
         if ok:
             self.session_paid = True
-            self._reader_payment_intent_id = None
             self._welcome_tap_enabled = False
             self._set_welcome_subtitle("Paid. Starting...")
             self.root.after(100, self.start_sequence)
@@ -1316,7 +1349,7 @@ class PhotoBoothUI:
 
     def show_code_entry_screen(self):
         self._code_screen_active = True
-        self._stop_reader_waiting(cancel_reader=True)
+        self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=False)
         self.clear_screens()
         self._load_code_background()
         self.code_frame.pack(expand=True, fill="both")
@@ -1326,7 +1359,10 @@ class PhotoBoothUI:
 
     def show_welcome_screen(self):
         self._code_screen_active = False
-        self._stop_reader_waiting(cancel_reader=True)
+        self._stop_reader_waiting(
+            cancel_reader=True,
+            clear_payment_intent=not (self.session_paid or self.is_running_sequence),
+        )
         self._hide_touch_keyboard()
         self.clear_screens()
         self.welcome_frame.pack(expand=True, fill="both")
@@ -1516,7 +1552,7 @@ class PhotoBoothUI:
         Must only run once per paid session.
         """
         self._code_screen_active = False
-        self._stop_reader_waiting(cancel_reader=True)
+        self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=False)
 
         if self.telemetry.is_out_of_paper():
             self.show_welcome_screen()
@@ -2119,7 +2155,7 @@ class PhotoBoothUI:
         if getattr(self, "_is_shutting_down", False):
             return
         self._is_shutting_down = True
-        self._stop_reader_waiting(cancel_reader=True)
+        self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=True)
 
         print("Shutting down booth...")
 
@@ -2205,6 +2241,7 @@ class PhotoBoothUI:
         self.session_paid = False
         self.is_running_sequence = False
         self.photo_index = 1
+        self._clear_reader_payment_intent()
 
         print(f"[CLEANUP] done. deleted {deleted} files.")
 
