@@ -704,6 +704,91 @@ class PhotoBoothUI:
             print(f"[STRIPE] Could not retrieve PaymentIntent {target_id}: {e}")
             return None
 
+    def _is_reader_busy_error(self, error: Exception) -> bool:
+        code = getattr(error, "code", None)
+        if code == "terminal_reader_busy":
+            return True
+        return "reader is currently busy processing another request" in str(error).lower()
+
+    def _finish_reader_wait_with_payment_status(
+        self,
+        generation: int,
+        payment_intent_id: str,
+        fallback_status: str,
+        *,
+        allow_requires_payment_method_failure: bool,
+    ):
+        pi_status = self._get_reader_payment_intent_status(payment_intent_id)
+        resolved_status = pi_status or fallback_status
+
+        if resolved_status == "succeeded":
+            print(f"[STRIPE] PaymentIntent {payment_intent_id} succeeded; starting booth.")
+            self.root.after(
+                0,
+                lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
+            )
+            return True
+
+        if resolved_status in ("failed", "canceled") or (
+            allow_requires_payment_method_failure and resolved_status == "requires_payment_method"
+        ):
+            print(f"[STRIPE] PaymentIntent {payment_intent_id} ended with status {resolved_status}.")
+            self.root.after(
+                0,
+                lambda gen=generation, status=resolved_status:
+                self._on_reader_payment_result(gen, False, status)
+            )
+            return True
+
+        return False
+
+    def _poll_reader_action_until_terminal(self, generation: int, payment_intent_id: str):
+        while self._reader_should_run and self._is_reader_generation_current(generation):
+            reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
+            action = getattr(reader, "action", None)
+
+            if not action:
+                pi_status = self._get_reader_payment_intent_status(payment_intent_id)
+                if pi_status == "succeeded":
+                    print(f"[STRIPE] PaymentIntent {payment_intent_id} succeeded without reader action; starting booth.")
+                    self.root.after(
+                        0,
+                        lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
+                    )
+                    return True
+                time.sleep(0.5)
+                continue
+
+            status = getattr(action, "status", None)
+
+            if status == "succeeded":
+                return self._finish_reader_wait_with_payment_status(
+                    generation,
+                    payment_intent_id,
+                    "succeeded",
+                    allow_requires_payment_method_failure=False,
+                )
+
+            if status == "failed":
+                return self._finish_reader_wait_with_payment_status(
+                    generation,
+                    payment_intent_id,
+                    "failed",
+                    allow_requires_payment_method_failure=True,
+                )
+
+            if status == "canceled":
+                print("[STRIPE] Reader action canceled.")
+                self.root.after(
+                    0,
+                    lambda gen=generation: self._on_reader_payment_result(gen, False, "canceled")
+                )
+                return True
+
+            time.sleep(0.5)
+
+        return False
+
     def _stop_reader_waiting(self, *, cancel_reader: bool, clear_payment_intent: bool = False):
         self._reader_should_run = False
         self._payment_in_progress = False
@@ -777,51 +862,19 @@ class PhotoBoothUI:
                 )
                 return
 
-            stripe.terminal.Reader.process_payment_intent(
-                STRIPE_READER_ID,
-                payment_intent=pi.id
-            )
+            try:
+                stripe.terminal.Reader.process_payment_intent(
+                    STRIPE_READER_ID,
+                    payment_intent=pi.id
+                )
+            except Exception as e:
+                if self._is_reader_busy_error(e):
+                    print("[STRIPE] Reader is busy; continuing to watch the existing reader action.")
+                else:
+                    raise
 
-            while self._reader_should_run and self._is_reader_generation_current(generation):
-                reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
-                action = getattr(reader, "action", None)
-
-                if not action:
-                    time.sleep(0.5)
-                    continue
-
-                status = getattr(action, "status", None)
-
-                if status == "succeeded":
-                    pi_status = self._get_reader_payment_intent_status(pi.id)
-                    print(f"[STRIPE] Reader action succeeded. PaymentIntent status: {pi_status}")
-                    if pi_status == "succeeded":
-                        self.root.after(
-                            0,
-                            lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
-                        )
-                        return
-
-                if status == "failed":
-                    pi_status = self._get_reader_payment_intent_status(pi.id)
-                    print(f"[STRIPE] Reader action failed. PaymentIntent status: {pi_status}")
-                    self.root.after(
-                        0,
-                        lambda gen=generation, status=(pi_status or "failed"):
-                        self._on_reader_payment_result(gen, False, status)
-                    )
-                    return
-
-                if status == "canceled":
-                    print("[STRIPE] Reader action canceled.")
-                    self.root.after(
-                        0,
-                        lambda gen=generation, status=status:
-                        self._on_reader_payment_result(gen, False, status)
-                    )
-                    return
-
-                time.sleep(0.5)
+            self._poll_reader_action_until_terminal(generation, pi.id)
+            return
 
         except Exception as e:
             pi_status = self._get_reader_payment_intent_status(getattr(pi, "id", None))
