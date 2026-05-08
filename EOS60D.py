@@ -565,6 +565,7 @@ class PhotoBoothUI:
             "i love you blair",
             "free for you!",
             "i love you",
+            "I love you Sathvi",
             "debugwarrior"
         }
         self.one_time_access_codes = {
@@ -2312,6 +2313,8 @@ class PhotoBoothUI:
 def main():
     run_dashboard()
     root = tk.Tk()
+    root.attributes("-fullscreen", True)
+    root.overrideredirect(True)
 
     # Heartbeat every 1 hour
     def schedule_heartbeat():

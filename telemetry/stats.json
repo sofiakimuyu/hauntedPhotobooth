@@ -5,9 +5,9 @@
     "sessions_started": 9,
     "sessions_completed": 1,
     "photos_taken": 0,
-    "prints_total": 73,
-    "prints_success": 39,
-    "prints_failed": 34,
+    "prints_total": 75,
+    "prints_success": 40,
+    "prints_failed": 35,
     "template_counts": {
       "Template 1": 1,
       "Template 5": 2,
@@ -117,10 +117,19 @@
       "prints_success": 0,
       "prints_failed": 0,
       "template_counts": {}
+    },
+    "2026-05-08": {
+      "sessions_started": 0,
+      "sessions_completed": 0,
+      "photos_taken": 0,
+      "prints_total": 2,
+      "prints_success": 1,
+      "prints_failed": 1,
+      "template_counts": {}
     }
   },
   "paper": {
-    "roll_prints": 38,
+    "roll_prints": 39,
     "last_reset_at": null,
     "notified_at": {
       "143": false,
@@ -130,10 +139,14 @@
     "out_of_paper": false
   },
   "last_event": {
-    "ts": "2026-04-29T16:17:10",
+    "ts": "2026-05-08T23:49:40",
     "booth_id": "Stanford booth",
-    "type": "booth_stopped",
-    "data": {}
+    "type": "crash",
+    "data": {
+      "exc_type": "KeyError",
+      "message": "'STRIPE_SECRET_KEY'",
+      "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 97, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"
+    }
   },
-  "last_heartbeat_at": "2026-04-29T16:16:52"
+  "last_heartbeat_at": "2026-05-08T23:49:40"
 }
