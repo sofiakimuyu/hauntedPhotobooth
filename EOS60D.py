@@ -2314,7 +2314,6 @@ def main():
     run_dashboard()
     root = tk.Tk()
     root.attributes("-fullscreen", True)
-    root.overrideredirect(True)
 
     # Heartbeat every 1 hour
     def schedule_heartbeat():
