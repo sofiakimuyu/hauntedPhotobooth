@@ -790,16 +790,27 @@ class PhotoBoothUI:
         status, _ = self._get_reader_action_details()
         return status
 
-    def _wait_for_reader_idle(self, timeout_sec: float = 10.0):
+    def _wait_for_reader_idle(self, timeout_sec: float = 20.0, stable_idle_sec: float = 2.0):
         deadline = time.time() + timeout_sec
+        idle_since = None
         while time.time() < deadline:
             status = self._get_reader_action_status()
             if not status:
-                return True
+                if idle_since is None:
+                    idle_since = time.time()
+                    print("[STRIPE] Reader appears idle; waiting briefly to confirm.")
+                elif time.time() - idle_since >= stable_idle_sec:
+                    print("[STRIPE] Reader confirmed idle.")
+                    return True
+                time.sleep(0.25)
+                continue
+            idle_since = None
             if status in ("failed", "canceled", "succeeded"):
+                print(f"[STRIPE] Reader action is terminal ({status}); waiting for it to clear.")
                 time.sleep(0.5)
                 continue
             time.sleep(0.5)
+        print("[STRIPE] Reader did not become idle before timeout.")
         return False
 
     def _cancel_payment_intent_if_reusable(self, payment_intent_id: str | None):
@@ -987,7 +998,7 @@ class PhotoBoothUI:
                     self._cancel_payment_intent_if_reusable(pi.id)
                     self._reset_reader_for_new_payment()
                     self.root.after(
-                        0,
+                        1500,
                         lambda gen=generation: self._on_reader_payment_error(
                             gen,
                             "Reader was busy; it was reset and will retry with a fresh payment."
