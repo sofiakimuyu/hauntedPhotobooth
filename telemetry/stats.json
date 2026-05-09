@@ -126,6 +126,15 @@
       "prints_success": 1,
       "prints_failed": 1,
       "template_counts": {}
+    },
+    "2026-05-09": {
+      "sessions_started": 0,
+      "sessions_completed": 0,
+      "photos_taken": 0,
+      "prints_total": 0,
+      "prints_success": 0,
+      "prints_failed": 0,
+      "template_counts": {}
     }
   },
   "paper": {
@@ -139,14 +148,10 @@
     "out_of_paper": false
   },
   "last_event": {
-    "ts": "2026-05-08T23:49:40",
+    "ts": "2026-05-09T00:42:43",
     "booth_id": "Stanford booth",
-    "type": "crash",
-    "data": {
-      "exc_type": "KeyError",
-      "message": "'STRIPE_SECRET_KEY'",
-      "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 97, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"
-    }
+    "type": "booth_stopped",
+    "data": {}
   },
-  "last_heartbeat_at": "2026-05-08T23:49:40"
+  "last_heartbeat_at": "2026-05-09T00:30:53"
 }

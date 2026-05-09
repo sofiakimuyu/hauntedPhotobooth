@@ -1,5 +1,4 @@
 
-
 # Import all the libraries you need
 from datetime import datetime
 import tkinter as tk
@@ -711,6 +710,46 @@ class PhotoBoothUI:
             return True
         return "reader is currently busy processing another request" in str(error).lower()
 
+    def _get_reader_action_status(self):
+        try:
+            reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
+            action = getattr(reader, "action", None)
+            status = getattr(action, "status", None) if action else None
+            if status:
+                print(f"[STRIPE] Reader currently has action status {status}")
+            return status
+        except Exception as e:
+            print(f"[STRIPE] Could not retrieve reader action: {e}")
+            return None
+
+    def _wait_for_reader_idle(self, timeout_sec: float = 10.0):
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            status = self._get_reader_action_status()
+            if not status:
+                return True
+            if status in ("failed", "canceled", "succeeded"):
+                time.sleep(0.5)
+                continue
+            time.sleep(0.5)
+        return False
+
+    def _prepare_reader_for_payment(self):
+        action_status = self._get_reader_action_status()
+        if not action_status:
+            return
+
+        current_intent_status = self._get_reader_payment_intent_status()
+
+        if self._reader_payment_intent_id and current_intent_status not in (None, "succeeded", "canceled"):
+            print("[STRIPE] Reader already has an active action for the current PaymentIntent; continuing to watch it.")
+            return
+
+        print("[STRIPE] Clearing stale reader action before creating a new PaymentIntent.")
+        self._cancel_reader_action_safely()
+        self._wait_for_reader_idle()
+        self._clear_reader_payment_intent()
+
     def _finish_reader_wait_with_payment_status(
         self,
         generation: int,
@@ -850,6 +889,10 @@ class PhotoBoothUI:
     def _reader_wait_loop(self, generation: int):
         pi = None
         try:
+            self._prepare_reader_for_payment()
+            if not self._is_reader_generation_current(generation):
+                return
+
             pi = self._get_or_create_reader_payment_intent()
             if not self._is_reader_generation_current(generation):
                 return
