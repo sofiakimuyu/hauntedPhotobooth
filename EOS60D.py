@@ -975,10 +975,12 @@ class PhotoBoothUI:
                 return
 
             try:
+                print(f"[STRIPE] Sending PaymentIntent {pi.id} to reader {STRIPE_READER_ID}")
                 stripe.terminal.Reader.process_payment_intent(
                     STRIPE_READER_ID,
                     payment_intent=pi.id
                 )
+                print(f"[STRIPE] Reader accepted PaymentIntent {pi.id}")
             except Exception as e:
                 if self._is_reader_busy_error(e):
                     print("[STRIPE] Reader is still busy after reset; canceling this PaymentIntent and retrying.")
