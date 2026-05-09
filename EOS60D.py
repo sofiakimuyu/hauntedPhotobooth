@@ -868,6 +868,7 @@ class PhotoBoothUI:
         return False
 
     def _poll_reader_action_until_terminal(self, generation: int, payment_intent_id: str):
+        last_logged_status = None
         while self._reader_should_run and self._is_reader_generation_current(generation):
             reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
             action = getattr(reader, "action", None)
@@ -890,6 +891,9 @@ class PhotoBoothUI:
                 continue
 
             status = getattr(action, "status", None)
+            if status and status != last_logged_status:
+                print(f"[STRIPE] Reader live status is {status}")
+                last_logged_status = status
 
             if status == "succeeded":
                 return self._finish_reader_wait_with_payment_status(
