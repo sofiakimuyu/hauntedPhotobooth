@@ -710,17 +710,85 @@ class PhotoBoothUI:
             return True
         return "reader is currently busy processing another request" in str(error).lower()
 
-    def _get_reader_action_status(self):
+    def _stripe_obj_get(self, obj, attr, default=None):
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(attr, default)
+        return getattr(obj, attr, default)
+
+    def _extract_payment_intent_id_from_reader_action(self, action):
+        if not action:
+            return None
+
+        # Stripe terminal actions can nest the PaymentIntent id under the
+        # action-specific payload. Try the common shapes first, then fall back
+        # to a small recursive search.
+        for action_attr in (
+            "process_payment_intent",
+            "collect_payment_method",
+            "confirm_payment_intent",
+        ):
+            payload = self._stripe_obj_get(action, action_attr)
+            payment_intent_id = self._stripe_obj_get(payload, "payment_intent")
+            if payment_intent_id:
+                return payment_intent_id
+
+        direct_payment_intent_id = self._stripe_obj_get(action, "payment_intent")
+        if direct_payment_intent_id:
+            return direct_payment_intent_id
+
+        def _search(node, depth=0):
+            if node is None or depth > 3:
+                return None
+            if isinstance(node, str):
+                return node if node.startswith("pi_") else None
+            if isinstance(node, dict):
+                payment_intent_id = node.get("payment_intent")
+                if isinstance(payment_intent_id, str) and payment_intent_id.startswith("pi_"):
+                    return payment_intent_id
+                for value in node.values():
+                    found = _search(value, depth + 1)
+                    if found:
+                        return found
+                return None
+            if isinstance(node, (list, tuple)):
+                for value in node:
+                    found = _search(value, depth + 1)
+                    if found:
+                        return found
+                return None
+
+            payment_intent_id = getattr(node, "payment_intent", None)
+            if isinstance(payment_intent_id, str) and payment_intent_id.startswith("pi_"):
+                return payment_intent_id
+
+            for attr in ("collect_payment_method", "process_payment_intent", "confirm_payment_intent"):
+                found = _search(getattr(node, attr, None), depth + 1)
+                if found:
+                    return found
+            return None
+
+        return _search(action)
+
+    def _get_reader_action_details(self):
         try:
             reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
             action = getattr(reader, "action", None)
             status = getattr(action, "status", None) if action else None
+            payment_intent_id = self._extract_payment_intent_id_from_reader_action(action)
             if status:
                 print(f"[STRIPE] Reader currently has action status {status}")
-            return status
+            if payment_intent_id:
+                print(f"[STRIPE] Reader action is tied to PaymentIntent {payment_intent_id}")
+            return status, payment_intent_id
         except Exception as e:
             print(f"[STRIPE] Could not retrieve reader action: {e}")
-            return None
+            return None, None
+
+    def _get_reader_action_status(self):
+        status, _ = self._get_reader_action_details()
+        return status
 
     def _wait_for_reader_idle(self, timeout_sec: float = 10.0):
         deadline = time.time() + timeout_sec
@@ -735,13 +803,21 @@ class PhotoBoothUI:
         return False
 
     def _prepare_reader_for_payment(self):
-        action_status = self._get_reader_action_status()
+        action_status, action_payment_intent_id = self._get_reader_action_details()
         if not action_status:
             return
 
-        current_intent_status = self._get_reader_payment_intent_status()
+        if action_payment_intent_id:
+            self._reader_payment_intent_id = action_payment_intent_id
 
-        if self._reader_payment_intent_id and current_intent_status not in (None, "succeeded", "canceled"):
+        current_intent_status = self._get_reader_payment_intent_status(
+            action_payment_intent_id or getattr(self, "_reader_payment_intent_id", None)
+        )
+
+        if (
+            (action_payment_intent_id or self._reader_payment_intent_id)
+            and current_intent_status not in (None, "succeeded", "canceled")
+        ):
             print("[STRIPE] Reader already has an active action for the current PaymentIntent; continuing to watch it.")
             return
 
@@ -786,11 +862,16 @@ class PhotoBoothUI:
         while self._reader_should_run and self._is_reader_generation_current(generation):
             reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
             action = getattr(reader, "action", None)
+            current_payment_intent_id = (
+                self._extract_payment_intent_id_from_reader_action(action)
+                or payment_intent_id
+            )
+            self._reader_payment_intent_id = current_payment_intent_id
 
             if not action:
-                pi_status = self._get_reader_payment_intent_status(payment_intent_id)
+                pi_status = self._get_reader_payment_intent_status(current_payment_intent_id)
                 if pi_status == "succeeded":
-                    print(f"[STRIPE] PaymentIntent {payment_intent_id} succeeded without reader action; starting booth.")
+                    print(f"[STRIPE] PaymentIntent {current_payment_intent_id} succeeded without reader action; starting booth.")
                     self.root.after(
                         0,
                         lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
@@ -804,7 +885,7 @@ class PhotoBoothUI:
             if status == "succeeded":
                 return self._finish_reader_wait_with_payment_status(
                     generation,
-                    payment_intent_id,
+                    current_payment_intent_id,
                     "succeeded",
                     allow_requires_payment_method_failure=False,
                 )
@@ -812,7 +893,7 @@ class PhotoBoothUI:
             if status == "failed":
                 return self._finish_reader_wait_with_payment_status(
                     generation,
-                    payment_intent_id,
+                    current_payment_intent_id,
                     "failed",
                     allow_requires_payment_method_failure=True,
                 )
@@ -914,10 +995,16 @@ class PhotoBoothUI:
             except Exception as e:
                 if self._is_reader_busy_error(e):
                     print("[STRIPE] Reader is busy; continuing to watch the existing reader action.")
+                    _, action_payment_intent_id = self._get_reader_action_details()
+                    if action_payment_intent_id:
+                        self._reader_payment_intent_id = action_payment_intent_id
                 else:
                     raise
 
-            self._poll_reader_action_until_terminal(generation, pi.id)
+            self._poll_reader_action_until_terminal(
+                generation,
+                getattr(self, "_reader_payment_intent_id", None) or pi.id
+            )
             return
 
         except Exception as e:
