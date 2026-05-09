@@ -802,29 +802,27 @@ class PhotoBoothUI:
             time.sleep(0.5)
         return False
 
-    def _prepare_reader_for_payment(self):
-        action_status, action_payment_intent_id = self._get_reader_action_details()
-        if not action_status:
+    def _cancel_payment_intent_if_reusable(self, payment_intent_id: str | None):
+        if not payment_intent_id:
             return
+        try:
+            pi = stripe.PaymentIntent.retrieve(payment_intent_id)
+            pi_status = getattr(pi, "status", None)
+            if pi_status in ("requires_payment_method", "requires_confirmation"):
+                stripe.PaymentIntent.cancel(payment_intent_id)
+                print(f"[STRIPE] Canceled unused PaymentIntent {payment_intent_id}")
+        except Exception as e:
+            print(f"[STRIPE] Could not cancel PaymentIntent {payment_intent_id}: {e}")
 
-        if action_payment_intent_id:
-            self._reader_payment_intent_id = action_payment_intent_id
-
-        current_intent_status = self._get_reader_payment_intent_status(
-            action_payment_intent_id or getattr(self, "_reader_payment_intent_id", None)
-        )
-
-        if (
-            (action_payment_intent_id or self._reader_payment_intent_id)
-            and current_intent_status not in (None, "succeeded", "canceled")
-        ):
-            print("[STRIPE] Reader already has an active action for the current PaymentIntent; continuing to watch it.")
-            return
-
-        print("[STRIPE] Clearing stale reader action before creating a new PaymentIntent.")
+    def _reset_reader_for_new_payment(self):
+        self._cancel_payment_intent_if_reusable(getattr(self, "_reader_payment_intent_id", None))
+        print("[STRIPE] Resetting reader state before creating a new PaymentIntent.")
         self._cancel_reader_action_safely()
         self._wait_for_reader_idle()
         self._clear_reader_payment_intent()
+
+    def _prepare_reader_for_payment(self):
+        self._reset_reader_for_new_payment()
 
     def _finish_reader_wait_with_payment_status(
         self,
@@ -945,18 +943,7 @@ class PhotoBoothUI:
             daemon=True
         ).start()
 
-    def _get_or_create_reader_payment_intent(self):
-        existing_id = getattr(self, "_reader_payment_intent_id", None)
-        if existing_id:
-            try:
-                pi = stripe.PaymentIntent.retrieve(existing_id)
-                pi_status = getattr(pi, "status", None)
-                print(f"[STRIPE] Reusing PaymentIntent {existing_id} with status {pi_status}")
-                if pi_status != "canceled":
-                    return pi
-            except Exception as e:
-                print(f"[STRIPE] Could not reuse PaymentIntent {existing_id}: {e}")
-
+    def _create_reader_payment_intent(self):
         pi = stripe.PaymentIntent.create(
             amount=self.session_price_cents,
             currency="usd",
@@ -974,7 +961,7 @@ class PhotoBoothUI:
             if not self._is_reader_generation_current(generation):
                 return
 
-            pi = self._get_or_create_reader_payment_intent()
+            pi = self._create_reader_payment_intent()
             if not self._is_reader_generation_current(generation):
                 return
 
@@ -994,10 +981,17 @@ class PhotoBoothUI:
                 )
             except Exception as e:
                 if self._is_reader_busy_error(e):
-                    print("[STRIPE] Reader is busy; continuing to watch the existing reader action.")
-                    _, action_payment_intent_id = self._get_reader_action_details()
-                    if action_payment_intent_id:
-                        self._reader_payment_intent_id = action_payment_intent_id
+                    print("[STRIPE] Reader is still busy after reset; canceling this PaymentIntent and retrying.")
+                    self._cancel_payment_intent_if_reusable(pi.id)
+                    self._reset_reader_for_new_payment()
+                    self.root.after(
+                        0,
+                        lambda gen=generation: self._on_reader_payment_error(
+                            gen,
+                            "Reader was busy; it was reset and will retry with a fresh payment."
+                        )
+                    )
+                    return
                 else:
                     raise
 
