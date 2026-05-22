@@ -1,0 +1,17 @@
+{
+  "name": "Overlay with hand clasped 2026",
+
+  "defaults": {
+    "x": 40,
+    "w": 522,
+    "h": 400,
+    "rotation": 0
+  },
+
+  "slots": [
+    { "id": 1, "y": 40 },
+    { "id": 2, "y": 480 },
+    { "id": 3, "y": 920 },
+    { "id": 4, "y": 1360 }
+  ]
+}
