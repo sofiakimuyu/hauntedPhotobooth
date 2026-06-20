@@ -1405,6 +1405,7 @@ class PhotoBoothUI:
             print(f"[WARN] Could not save used access codes: {e}")
 
     def _grant_code_access(self):
+        self._cancel_code_screen_timeout()
         self.code_error_var.set("")
         self.code_entry_var.set("")
         self._hide_touch_keyboard()
@@ -1555,6 +1556,15 @@ class PhotoBoothUI:
         for child in self.container.winfo_children():
             child.pack_forget()
 
+    def _cancel_code_screen_timeout(self):
+        after_id = getattr(self, "_code_screen_timeout_id", None)
+        if after_id:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+        self._code_screen_timeout_id = None
+
     def show_code_entry_screen(self):
         self._code_screen_active = True
         self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=False)
@@ -1564,8 +1574,11 @@ class PhotoBoothUI:
         self.code_entry_var.set("")
         self.code_error_var.set("")
         self.root.after(100, self._focus_code_entry)
+        self._cancel_code_screen_timeout()
+        self._code_screen_timeout_id = self.root.after(5 * 60 * 1000, self.show_welcome_screen)
 
     def show_welcome_screen(self):
+        self._cancel_code_screen_timeout()
         self._code_screen_active = False
         self._stop_reader_waiting(
             cancel_reader=True,
