@@ -1,0 +1,17 @@
+{
+  "name": "FDof13th Notebook Template",
+
+  "defaults": {
+    "x": 40,
+    "w": 520,
+    "h": 362,
+    "rotation": 0
+  },
+
+  "slots": [
+    { "id": 1, "y": 110 },
+    { "id": 2, "y": 498 },
+    { "id": 3, "y": 886 },
+    { "id": 4, "y": 1274}
+  ]
+}
