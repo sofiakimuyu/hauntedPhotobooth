@@ -1,18 +1,18 @@
 {
-  "name": "Stanford Red Checkered Template NOT DONE",
+  "name": "Stanford Red Checkered Template",
   "layer_mode": "overlay",
 
   "defaults": {
-    "x": 40,
-    "w": 522,
-    "h": 400,
+    "x": 60,
+    "w": 483,
+    "h": 325,
     "rotation": 0
   },
 
   "slots": [
-    { "id": 1, "y": 40 },
-    { "id": 2, "y": 480 },
-    { "id": 3, "y": 920 },
-    { "id": 4, "y": 1360 }
+    { "id": 1, "y": 201 },
+    { "id": 2, "y": 559 },
+    { "id": 3, "y": 917 },
+    { "id": 4, "y": 1275 }
   ]
 }
