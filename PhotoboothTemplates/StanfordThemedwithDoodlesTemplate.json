@@ -1,1 +1,18 @@
+{
+  "name": "Stanford Themed w Doodles",
+  "layer_mode": "overlay",
 
+  "defaults": {
+    "x": 60,
+    "w": 480,
+    "h": 329,
+    "rotation": 0
+  },
+
+  "slots": [
+    { "id": 1, "y": 193 },
+    { "id": 2, "y": 564 },
+    { "id": 3, "y": 923 },
+    { "id": 4, "y": 1289 }
+  ]
+}
