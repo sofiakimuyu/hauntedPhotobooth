@@ -2,18 +2,23 @@
   "booth_id": "Stanford booth",
   "created_at": "2026-01-10T09:04:30",
   "lifetime": {
-    "sessions_started": 9,
-    "sessions_completed": 1,
+    "sessions_started": 22,
+    "sessions_completed": 13,
     "photos_taken": 0,
-    "prints_total": 75,
-    "prints_success": 40,
+    "prints_total": 87,
+    "prints_success": 52,
     "prints_failed": 35,
     "template_counts": {
       "Template 1": 1,
       "Template 5": 2,
       "Template 4": 1,
       "Template 3": 1,
-      "Template 6": 1
+      "Template 6": 1,
+      "Stanford Red Checkered Template": 4,
+      "Stanford Animated Bear Template": 2,
+      "Film Strip": 2,
+      "Nothing with light pink hearts": 2,
+      "FDof13th Notebook Template": 2
     }
   },
   "daily": {
@@ -135,10 +140,46 @@
       "prints_success": 0,
       "prints_failed": 0,
       "template_counts": {}
+    },
+    "2026-09-19": {
+      "sessions_started": 11,
+      "sessions_completed": 10,
+      "photos_taken": 0,
+      "prints_total": 10,
+      "prints_success": 10,
+      "prints_failed": 0,
+      "template_counts": {
+        "Stanford Red Checkered Template": 3,
+        "Stanford Animated Bear Template": 2,
+        "Film Strip": 2,
+        "Nothing with light pink hearts": 2,
+        "FDof13th Notebook Template": 1
+      }
+    },
+    "2026-09-20": {
+      "sessions_started": 2,
+      "sessions_completed": 2,
+      "photos_taken": 0,
+      "prints_total": 2,
+      "prints_success": 2,
+      "prints_failed": 0,
+      "template_counts": {
+        "FDof13th Notebook Template": 1,
+        "Stanford Red Checkered Template": 1
+      }
+    },
+    "2026-09-21": {
+      "sessions_started": 0,
+      "sessions_completed": 0,
+      "photos_taken": 0,
+      "prints_total": 0,
+      "prints_success": 0,
+      "prints_failed": 0,
+      "template_counts": {}
     }
   },
   "paper": {
-    "roll_prints": 39,
+    "roll_prints": 51,
     "last_reset_at": null,
     "notified_at": {
       "143": false,
@@ -148,10 +189,10 @@
     "out_of_paper": false
   },
   "last_event": {
-    "ts": "2026-05-09T00:42:43",
+    "ts": "2026-09-21T13:43:01",
     "booth_id": "Stanford booth",
     "type": "booth_stopped",
     "data": {}
   },
-  "last_heartbeat_at": "2026-05-09T00:30:53"
+  "last_heartbeat_at": "2026-09-21T12:59:07"
 }
