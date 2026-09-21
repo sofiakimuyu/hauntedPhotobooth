@@ -1,6 +1,7 @@
 
 # Import all the libraries you need
-from datetime import datetime
+from datetime import datetime, date
+from zoneinfo import ZoneInfo
 import tkinter as tk
 from tkinter import messagebox
 import json
@@ -555,7 +556,18 @@ class PhotoBoothUI:
         self.photo_index = 1
         self.total_photos = 4
         self.filter_choice = "color"  # "color" or "bw"
-        self.session_price_cents = 424
+        # ---- pricing ----
+        # One-day $1 promo: on Sept 22, 2026 (Pacific time) the booth charges
+        # $1.00; every other day it charges the regular price. Anchored to
+        # America/Los_Angeles so it flips at Pacific midnight regardless of the
+        # machine's system timezone, and auto-reverts the next day.
+        REGULAR_PRICE_CENTS = 424
+        PROMO_PRICE_CENTS = 100
+        PROMO_DAY = date(2026, 9, 22)
+        today_pacific = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+        self.session_price_cents = (
+            PROMO_PRICE_CENTS if today_pacific == PROMO_DAY else REGULAR_PRICE_CENTS
+        )
         self.approved_access_codes = {
             "i'm a person in a high place",
             "sorry",
