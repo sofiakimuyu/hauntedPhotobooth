@@ -1,0 +1,17 @@
+{
+  "name": "FDof13th Black w/ Sparkles Template",
+
+  "defaults": {
+    "x": 40,
+    "w": 520,
+    "h": 362,
+    "rotation": 0
+  },
+
+  "slots": [
+    { "id": 1, "y": 41 },
+    { "id": 2, "y": 429 },
+    { "id": 3, "y": 817 },
+    { "id": 4, "y": 1206}
+  ]
+}
