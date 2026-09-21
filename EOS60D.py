@@ -2138,48 +2138,122 @@ class PhotoBoothUI:
             self.template_canvas.configure(scrollregion=(0, 0, 0, 0))
             return
 
-        # Grid layout
+        # Hide the fixed page title; section headers below act as the headings
+        # so "First Day of Classes Specials" is the first thing on the page.
+        self.template_canvas.itemconfig(self.template_title_item, state="hidden")
+
+        # ---- Curated layout: First Day of Classes Specials, then Classics ----
+        # Specials are placed by expected filename stem (TemplateDef.key). Files
+        # for the 14th-17th can be dropped in later with these exact names and
+        # they will fill the empty slots automatically. Naming pattern matches
+        # the existing 13th templates.
+        SPECIAL_DATES = (13, 14, 15, 16, 17)
+        NOTEBOOK_STEMS = [f"FDof{d}thNotebookTemplate" for d in SPECIAL_DATES]
+        SPARKLES_STEMS = [f"FDO{d}thGwSparklesTemplate" for d in SPECIAL_DATES]
+        OVERLAY_STEMS = ["FDO13thGwOverlaysTemplate"]
+
+        by_key = {t.key: t for t in self.templates}
+        special_keys = set(NOTEBOOK_STEMS) | set(SPARKLES_STEMS) | set(OVERLAY_STEMS)
+
+        # Classics = every template that is not one of the FDo... specials,
+        # in the order load_templates returned them.
+        classic_defs = [t for t in self.templates if t.key not in special_keys]
+
+        # ---- layout metrics ----
         screen_w = self.root.winfo_screenwidth()
-        start_y = 140
         pad = 18
         side_margin = 24
         bottom_scroll_padding = 260
-        cols = 4
+        cols = 5  # specials rows are 5-wide; classics reuse the same grid
 
         thumb_w = int((screen_w - side_margin * 2 - pad * (cols - 1)) / cols)
         thumb_h = int(thumb_w * 1.2)
 
-        # Create thumbnails
-        for idx, tdef in enumerate(self.templates):
-            col = idx % cols
-            row = idx // cols
+        def col_center_x(col: int) -> int:
+            return side_margin + col * (thumb_w + pad) + thumb_w // 2
 
-            x = side_margin + col * (thumb_w + pad) + thumb_w // 2
-            y = start_y + row * (thumb_h + pad) + thumb_h // 2
+        def draw_section_header(text: str, top_y: int) -> int:
+            item = self.template_canvas.create_text(
+                side_margin,
+                top_y,
+                text=text,
+                fill="black",
+                font=self.font_subtitle,
+                anchor="w",
+            )
+            self._template_grid_item_ids.append(item)
+            return top_y + 70  # space below header before the first row
 
+        def draw_tile(tdef: TemplateDef, cx: int, cy: int):
             try:
                 img = Image.open(tdef.png_path).convert("RGBA")
                 img.thumbnail((thumb_w, thumb_h), Image.LANCZOS)
                 tk_img = ImageTk.PhotoImage(img)
             except Exception as e:
                 print(f"[WARN] Could not load template {tdef.png_path}: {e}")
-                continue
-
+                return
             self._template_thumb_refs.append(tk_img)
-
             item_id = self.template_canvas.create_image(
-                x,
-                y,
-                image=tk_img,
-                anchor="center"
+                cx, cy, image=tk_img, anchor="center"
             )
             self._template_grid_item_ids.append(item_id)
-
             self.template_canvas.tag_bind(
                 item_id,
                 "<Button-1>",
-                lambda e, td=tdef: self.on_template_selected(td)
+                lambda e, td=tdef: self.on_template_selected(td),
             )
+
+        def draw_placeholder(label: str, cx: int, cy: int):
+            """Dashed box for a special whose PNG has not been added yet."""
+            left = cx - thumb_w // 2
+            top = cy - thumb_h // 2
+            rect = self.template_canvas.create_rectangle(
+                left, top, left + thumb_w, top + thumb_h,
+                outline="#bbbbbb", dash=(6, 4), width=2,
+            )
+            txt = self.template_canvas.create_text(
+                cx, cy, text=label, fill="#999999",
+                font=("Helvetica", 18, "normal"),
+                anchor="center", justify="center", width=thumb_w - 16,
+            )
+            self._template_grid_item_ids.extend([rect, txt])
+
+        def draw_specials_row(stems, top_y: int) -> int:
+            """One 5-wide row placed by filename stem; gaps get placeholders."""
+            for col, (stem, date) in enumerate(zip(stems, SPECIAL_DATES)):
+                cx = col_center_x(col)
+                cy = top_y + thumb_h // 2
+                tdef = by_key.get(stem)
+                if tdef is not None:
+                    draw_tile(tdef, cx, cy)
+                else:
+                    draw_placeholder(f"{date}th\n(coming soon)", cx, cy)
+            return top_y + thumb_h + pad
+
+        y = 120  # top of scrollable content
+
+        # ---- Section 1: First Day of Classes Specials ----
+        y = draw_section_header("First Day of Classes Specials", y)
+        y = draw_specials_row(NOTEBOOK_STEMS, y)
+        y = draw_specials_row(SPARKLES_STEMS, y)
+        # Row 3: the single "1 with overlays" (left-aligned, or placeholder)
+        overlay_tdef = by_key.get(OVERLAY_STEMS[0])
+        cy = y + thumb_h // 2
+        if overlay_tdef is not None:
+            draw_tile(overlay_tdef, col_center_x(0), cy)
+        else:
+            draw_placeholder("overlays\n(coming soon)", col_center_x(0), cy)
+        y = y + thumb_h + pad
+
+        # ---- Section 2: Classic Photostrips ----
+        y += 24  # extra breathing room before the next heading
+        y = draw_section_header("Classic Photostrips:", y)
+        for idx, tdef in enumerate(classic_defs):
+            col = idx % cols
+            row = idx // cols
+            cx = col_center_x(col)
+            cy = y + row * (thumb_h + pad) + thumb_h // 2
+            draw_tile(tdef, cx, cy)
 
         self.template_canvas.update_idletasks()
         bbox = self.template_canvas.bbox("all")
