@@ -1,7 +1,6 @@
 
 # Import all the libraries you need
-from datetime import datetime, date
-from zoneinfo import ZoneInfo
+from datetime import datetime, date, timezone, timedelta
 import tkinter as tk
 from tkinter import messagebox
 import json
@@ -325,6 +324,22 @@ def print_pil_image(img: Image.Image, printer_name: str | None = None):
             print(f"[WARN] Could not delete temp print file {temp_path}: {e}")
 
 
+def _pacific_today() -> date:
+    """
+    Today's date in US Pacific time, without depending on the system tz
+    database. Prefers zoneinfo (correct DST year-round) but falls back to a
+    fixed UTC-7 offset when the `tzdata` package / OS tz data is missing
+    (common on Windows), so the booth never crashes at startup. UTC-7 (PDT)
+    is correct for the Sept 22 promo window; the fallback only shifts the
+    midnight boundary slightly on non-promo days, which does not affect price.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=-7))).date()
+
+
 def load_templates(dir_path) -> list[TemplateDef]:
     """
     Load all matching .png + .json template pairs from a folder.
@@ -564,7 +579,7 @@ class PhotoBoothUI:
         REGULAR_PRICE_CENTS = 424
         PROMO_PRICE_CENTS = 100
         PROMO_DAY = date(2026, 9, 22)
-        today_pacific = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+        today_pacific = _pacific_today()
         self.session_price_cents = (
             PROMO_PRICE_CENTS if today_pacific == PROMO_DAY else REGULAR_PRICE_CENTS
         )
