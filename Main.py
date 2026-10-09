@@ -4,7 +4,6 @@ from datetime import datetime, date, timezone, timedelta
 import tkinter as tk
 from tkinter import messagebox
 import json
-import stripe
 from PIL import Image, ImageTk, ImageOps, ImageEnhance
 from pathlib import Path
 import os
@@ -91,10 +90,6 @@ if not _tg_token or not _tg_chat:
 telemetry.install_crash_hook()
 START_TIME = time.time()
 telemetry.booth_started()
-
-# Stripe Setup
-stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-STRIPE_READER_ID = os.environ["STRIPE_READER_ID"]
 
 # defines the data structures for photobooth templates
 @dataclass
@@ -571,43 +566,6 @@ class PhotoBoothUI:
         self.photo_index = 1
         self.total_photos = 4
         self.filter_choice = "color"  # "color" or "bw"
-        # ---- pricing ----
-        # One-day $1 promo: on Sept 22, 2026 (Pacific time) the booth charges
-        # $1.00; every other day it charges the regular price. Anchored to
-        # America/Los_Angeles so it flips at Pacific midnight regardless of the
-        # machine's system timezone, and auto-reverts the next day.
-        REGULAR_PRICE_CENTS = 424
-        PROMO_PRICE_CENTS = 100
-        PROMO_DAY = date(2026, 9, 22)
-        today_pacific = _pacific_today()
-        self.session_price_cents = (
-            PROMO_PRICE_CENTS if today_pacific == PROMO_DAY else REGULAR_PRICE_CENTS
-        )
-        self.approved_access_codes = {
-            "i'm a person in a high place",
-            "sorry",
-            "i want to make it up to you",
-            "sorry it failed before",
-            "i love you blair",
-            "free for you!",
-            "i love you",
-            "I love you Sathvi",
-            "debugwarrior"
-        }
-        self.one_time_access_codes = {
-            "strikeapose",
-            "saycheez",
-            "flashme",
-            "snapit",
-            "boothie",
-            "oopsie",
-            "strip",
-            "smile",
-            "freeslay",
-            "slay",
-        }
-        self.used_codes_path = BASE_DIR / "used_access_codes.json"
-        self.used_one_time_access_codes = self._load_used_one_time_access_codes()
 
         # ---- capture / printing ----
         self.captured_files = []  # stores captured image paths
@@ -621,10 +579,6 @@ class PhotoBoothUI:
             os.path.dirname(__file__),
             "stanfordwelcomebackground.png"
         )
-        self.code_bg_path = os.path.join(
-            os.path.dirname(__file__),
-            "specialpersonbackground.png"
-        )
 
         print(
             "WELCOME BG PATH:",
@@ -634,12 +588,6 @@ class PhotoBoothUI:
         )
 
         self.tk_welcome_bg = None
-        self.tk_code_bg = None
-
-        self._reader_should_run = False
-        self._reader_generation = 0
-        self._reader_payment_intent_id = None
-        self._code_screen_active = False
 
         # ---- fonts ----
         self.font_title = ("Helvetica", 64, "bold")
@@ -654,7 +602,6 @@ class PhotoBoothUI:
 
         # ---- build screens ----
         self.build_welcome_screen()
-        self.build_code_entry_screen()
         self.build_capture_screen()
         self.build_filter_screen()
         self.build_template_picker_screen()
@@ -683,424 +630,9 @@ class PhotoBoothUI:
         traceback.print_exception(exc_type, exc_value, exc_traceback)
         try:
             self.is_running_sequence = False
-            self.session_paid = False
             self.show_welcome_screen()
         except Exception as recovery_error:
             print(f"[WARN] Could not recover from UI exception: {recovery_error}")
-
-    def _formatted_session_price(self) -> str:
-        return f"${self.session_price_cents / 100:.2f}"
-
-    def _default_welcome_subtitle(self) -> str:
-        return f"Pay {self._formatted_session_price()} on the card reader to start"
-
-    def _set_welcome_subtitle(self, text: str):
-        try:
-            self.welcome_canvas.itemconfig(
-                self.subtitle_item,
-                text=text,
-                fill="white",
-                font=self.font_subtitle,
-            )
-        except Exception:
-            pass
-
-    def _is_reader_generation_current(self, generation: int) -> bool:
-        return generation == getattr(self, "_reader_generation", -1)
-
-    def _cancel_reader_action_safely(self):
-        try:
-            stripe.terminal.Reader.cancel_action(STRIPE_READER_ID)
-        except Exception:
-            pass
-
-    def _clear_reader_payment_intent(self):
-        self._reader_payment_intent_id = None
-
-    def _get_reader_payment_intent_status(self, payment_intent_id: str | None = None):
-        target_id = payment_intent_id or getattr(self, "_reader_payment_intent_id", None)
-        if not target_id:
-            return None
-
-        try:
-            pi = stripe.PaymentIntent.retrieve(target_id)
-            status = getattr(pi, "status", None)
-            print(f"[STRIPE] PaymentIntent {target_id} status is {status}")
-            return status
-        except Exception as e:
-            print(f"[STRIPE] Could not retrieve PaymentIntent {target_id}: {e}")
-            return None
-
-    def _is_reader_busy_error(self, error: Exception) -> bool:
-        code = getattr(error, "code", None)
-        if code == "terminal_reader_busy":
-            return True
-        return "reader is currently busy processing another request" in str(error).lower()
-
-    def _stripe_obj_get(self, obj, attr, default=None):
-        if obj is None:
-            return default
-        if isinstance(obj, dict):
-            return obj.get(attr, default)
-        return getattr(obj, attr, default)
-
-    def _extract_payment_intent_id_from_reader_action(self, action):
-        if not action:
-            return None
-
-        # Stripe terminal actions can nest the PaymentIntent id under the
-        # action-specific payload. Try the common shapes first, then fall back
-        # to a small recursive search.
-        for action_attr in (
-            "process_payment_intent",
-            "collect_payment_method",
-            "confirm_payment_intent",
-        ):
-            payload = self._stripe_obj_get(action, action_attr)
-            payment_intent_id = self._stripe_obj_get(payload, "payment_intent")
-            if payment_intent_id:
-                return payment_intent_id
-
-        direct_payment_intent_id = self._stripe_obj_get(action, "payment_intent")
-        if direct_payment_intent_id:
-            return direct_payment_intent_id
-
-        def _search(node, depth=0):
-            if node is None or depth > 3:
-                return None
-            if isinstance(node, str):
-                return node if node.startswith("pi_") else None
-            if isinstance(node, dict):
-                payment_intent_id = node.get("payment_intent")
-                if isinstance(payment_intent_id, str) and payment_intent_id.startswith("pi_"):
-                    return payment_intent_id
-                for value in node.values():
-                    found = _search(value, depth + 1)
-                    if found:
-                        return found
-                return None
-            if isinstance(node, (list, tuple)):
-                for value in node:
-                    found = _search(value, depth + 1)
-                    if found:
-                        return found
-                return None
-
-            payment_intent_id = getattr(node, "payment_intent", None)
-            if isinstance(payment_intent_id, str) and payment_intent_id.startswith("pi_"):
-                return payment_intent_id
-
-            for attr in ("collect_payment_method", "process_payment_intent", "confirm_payment_intent"):
-                found = _search(getattr(node, attr, None), depth + 1)
-                if found:
-                    return found
-            return None
-
-        return _search(action)
-
-    def _get_reader_action_details(self):
-        try:
-            reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
-            action = getattr(reader, "action", None)
-            status = getattr(action, "status", None) if action else None
-            payment_intent_id = self._extract_payment_intent_id_from_reader_action(action)
-            if status:
-                print(f"[STRIPE] Reader currently has action status {status}")
-            if payment_intent_id:
-                print(f"[STRIPE] Reader action is tied to PaymentIntent {payment_intent_id}")
-            return status, payment_intent_id
-        except Exception as e:
-            print(f"[STRIPE] Could not retrieve reader action: {e}")
-            return None, None
-
-    def _get_reader_action_status(self):
-        status, _ = self._get_reader_action_details()
-        return status
-
-    def _wait_for_reader_idle(self, timeout_sec: float = 20.0, stable_idle_sec: float = 2.0):
-        deadline = time.time() + timeout_sec
-        idle_since = None
-        while time.time() < deadline:
-            status = self._get_reader_action_status()
-            if not status:
-                if idle_since is None:
-                    idle_since = time.time()
-                    print("[STRIPE] Reader appears idle; waiting briefly to confirm.")
-                elif time.time() - idle_since >= stable_idle_sec:
-                    print("[STRIPE] Reader confirmed idle.")
-                    return True
-                time.sleep(0.25)
-                continue
-            idle_since = None
-            if status in ("failed", "canceled", "succeeded"):
-                print(f"[STRIPE] Reader action is terminal ({status}); waiting for it to clear.")
-                time.sleep(0.5)
-                continue
-            time.sleep(0.5)
-        print("[STRIPE] Reader did not become idle before timeout.")
-        return False
-
-    def _cancel_payment_intent_if_reusable(self, payment_intent_id: str | None):
-        if not payment_intent_id:
-            return
-        try:
-            pi = stripe.PaymentIntent.retrieve(payment_intent_id)
-            pi_status = getattr(pi, "status", None)
-            if pi_status in ("requires_payment_method", "requires_confirmation"):
-                stripe.PaymentIntent.cancel(payment_intent_id)
-                print(f"[STRIPE] Canceled unused PaymentIntent {payment_intent_id}")
-        except Exception as e:
-            print(f"[STRIPE] Could not cancel PaymentIntent {payment_intent_id}: {e}")
-
-    def _reset_reader_for_new_payment(self):
-        self._cancel_payment_intent_if_reusable(getattr(self, "_reader_payment_intent_id", None))
-        print("[STRIPE] Resetting reader state before creating a new PaymentIntent.")
-        self._cancel_reader_action_safely()
-        self._wait_for_reader_idle()
-        self._clear_reader_payment_intent()
-
-    def _prepare_reader_for_payment(self):
-        self._reset_reader_for_new_payment()
-
-    def _finish_reader_wait_with_payment_status(
-        self,
-        generation: int,
-        payment_intent_id: str,
-        fallback_status: str,
-        *,
-        allow_requires_payment_method_failure: bool,
-    ):
-        pi_status = self._get_reader_payment_intent_status(payment_intent_id)
-        resolved_status = pi_status or fallback_status
-
-        if resolved_status == "succeeded":
-            print(f"[STRIPE] PaymentIntent {payment_intent_id} succeeded; starting booth.")
-            self.root.after(
-                0,
-                lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
-            )
-            return True
-
-        if resolved_status in ("failed", "canceled") or (
-            allow_requires_payment_method_failure and resolved_status == "requires_payment_method"
-        ):
-            print(f"[STRIPE] PaymentIntent {payment_intent_id} ended with status {resolved_status}.")
-            self.root.after(
-                0,
-                lambda gen=generation, status=resolved_status:
-                self._on_reader_payment_result(gen, False, status)
-            )
-            return True
-
-        return False
-
-    def _poll_reader_action_until_terminal(self, generation: int, payment_intent_id: str):
-        last_logged_status = None
-        saw_live_action = False
-        while self._reader_should_run and self._is_reader_generation_current(generation):
-            reader = stripe.terminal.Reader.retrieve(STRIPE_READER_ID)
-            action = getattr(reader, "action", None)
-            current_payment_intent_id = (
-                self._extract_payment_intent_id_from_reader_action(action)
-                or payment_intent_id
-            )
-            self._reader_payment_intent_id = current_payment_intent_id
-
-            if not action:
-                pi_status = self._get_reader_payment_intent_status(current_payment_intent_id)
-                if pi_status == "succeeded":
-                    print(f"[STRIPE] PaymentIntent {current_payment_intent_id} succeeded without reader action; starting booth.")
-                    self.root.after(
-                        0,
-                        lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
-                    )
-                    return True
-                if saw_live_action and pi_status in ("requires_payment_method", "requires_confirmation", "failed", "canceled"):
-                    print(
-                        f"[STRIPE] Reader action cleared and PaymentIntent {current_payment_intent_id} resolved to {pi_status}; restarting payment."
-                    )
-                    self.root.after(
-                        0,
-                        lambda gen=generation, status=pi_status:
-                        self._on_reader_payment_result(gen, False, status)
-                    )
-                    return True
-                time.sleep(0.5)
-                continue
-
-            status = getattr(action, "status", None)
-            if status and status != last_logged_status:
-                print(f"[STRIPE] Reader live status is {status}")
-                last_logged_status = status
-            if status:
-                saw_live_action = True
-
-            if status == "succeeded":
-                return self._finish_reader_wait_with_payment_status(
-                    generation,
-                    current_payment_intent_id,
-                    "succeeded",
-                    allow_requires_payment_method_failure=False,
-                )
-
-            if status == "failed":
-                return self._finish_reader_wait_with_payment_status(
-                    generation,
-                    current_payment_intent_id,
-                    "failed",
-                    allow_requires_payment_method_failure=True,
-                )
-
-            if status == "canceled":
-                print("[STRIPE] Reader action canceled.")
-                self.root.after(
-                    0,
-                    lambda gen=generation: self._on_reader_payment_result(gen, False, "canceled")
-                )
-                return True
-
-            time.sleep(0.5)
-
-        return False
-
-    def _stop_reader_waiting(self, *, cancel_reader: bool, clear_payment_intent: bool = False):
-        self._reader_should_run = False
-        self._payment_in_progress = False
-        if clear_payment_intent:
-            self._clear_reader_payment_intent()
-        self._reader_generation += 1
-        if cancel_reader:
-            threading.Thread(
-                target=self._cancel_reader_action_safely,
-                daemon=True
-            ).start()
-
-    def _start_reader_waiting(self):
-        if getattr(self, "_is_shutting_down", False):
-            return
-        if self.telemetry.is_out_of_paper():
-            return
-        if self.session_paid or self.is_running_sequence:
-            return
-        if getattr(self, "_code_screen_active", False):
-            return
-        if getattr(self, "_reader_should_run", False):
-            return
-
-        self._reader_should_run = True
-        self._payment_in_progress = True
-        self._reader_generation += 1
-        generation = self._reader_generation
-        self._set_welcome_subtitle(self._default_welcome_subtitle())
-
-        threading.Thread(
-            target=lambda: self._reader_wait_loop(generation),
-            daemon=True
-        ).start()
-
-    def _create_reader_payment_intent(self):
-        pi = stripe.PaymentIntent.create(
-            amount=self.session_price_cents,
-            currency="usd",
-            payment_method_types=["card_present"],
-            description="Photobooth session"
-        )
-        print(f"[STRIPE] Created new PaymentIntent {pi.id}")
-        self._reader_payment_intent_id = pi.id
-        return pi
-
-    def _reader_wait_loop(self, generation: int):
-        pi = None
-        try:
-            self._prepare_reader_for_payment()
-            if not self._is_reader_generation_current(generation):
-                return
-
-            pi = self._create_reader_payment_intent()
-            if not self._is_reader_generation_current(generation):
-                return
-
-            pi_status = getattr(pi, "status", None)
-            if pi_status == "succeeded":
-                print(f"[STRIPE] PaymentIntent {pi.id} already succeeded; starting booth.")
-                self.root.after(
-                    0,
-                    lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
-                )
-                return
-
-            try:
-                print(f"[STRIPE] Sending PaymentIntent {pi.id} to reader {STRIPE_READER_ID}")
-                stripe.terminal.Reader.process_payment_intent(
-                    STRIPE_READER_ID,
-                    payment_intent=pi.id
-                )
-                print(f"[STRIPE] Reader accepted PaymentIntent {pi.id}")
-            except Exception as e:
-                if self._is_reader_busy_error(e):
-                    print("[STRIPE] Reader is still busy after reset; canceling this PaymentIntent and retrying.")
-                    self._cancel_payment_intent_if_reusable(pi.id)
-                    self._reset_reader_for_new_payment()
-                    self.root.after(
-                        1500,
-                        lambda gen=generation: self._on_reader_payment_error(
-                            gen,
-                            "Reader was busy; it was reset and will retry with a fresh payment."
-                        )
-                    )
-                    return
-                else:
-                    raise
-
-            self._poll_reader_action_until_terminal(
-                generation,
-                getattr(self, "_reader_payment_intent_id", None) or pi.id
-            )
-            return
-
-        except Exception as e:
-            pi_status = self._get_reader_payment_intent_status(getattr(pi, "id", None))
-            if pi_status == "succeeded":
-                print("[STRIPE] Reader command errored, but payment succeeded; starting booth.")
-                self.root.after(
-                    0,
-                    lambda gen=generation: self._on_reader_payment_result(gen, True, "succeeded")
-                )
-                return
-            self.root.after(
-                0,
-                lambda gen=generation, msg=str(e): self._on_reader_payment_error(gen, msg)
-            )
-
-    def _on_reader_payment_result(self, generation: int, ok: bool, status: str):
-        if not self._is_reader_generation_current(generation):
-            return
-
-        self._reader_should_run = False
-        self._payment_in_progress = False
-        self._reader_generation += 1
-
-        if ok:
-            self.session_paid = True
-            self._welcome_tap_enabled = False
-            self._set_welcome_subtitle("Paid. Starting...")
-            self.root.after(100, self.start_sequence)
-            return
-
-        self.session_paid = False
-        self._set_welcome_subtitle(self._default_welcome_subtitle())
-        self.root.after(250, self._start_reader_waiting)
-
-    def _on_reader_payment_error(self, generation: int, message: str):
-        if not self._is_reader_generation_current(generation):
-            return
-
-        print(f"[STRIPE] Reader wait error: {message}")
-        self._reader_should_run = False
-        self._payment_in_progress = False
-        self._reader_generation += 1
-        self._set_welcome_subtitle(self._default_welcome_subtitle())
-        self.root.after(1000, self._start_reader_waiting)
 
     def build_welcome_screen(self):
         self.welcome_frame = tk.Frame(self.container, bg="black")
@@ -1150,7 +682,7 @@ class PhotoBoothUI:
         self.subtitle_item = self.welcome_canvas.create_text(
             self.root.winfo_screenwidth() // 2,
             500,
-            text=self._default_welcome_subtitle(),
+            text="Tap START to begin",
             fill="white",
             font=self.font_subtitle,
             anchor="center"
@@ -1159,318 +691,37 @@ class PhotoBoothUI:
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
 
-        self.code_button_rect = self.welcome_canvas.create_rectangle(
-            screen_w - 360, screen_h - 180, screen_w - 140, screen_h - 116,
-            fill="black",
+        # START button (centered in the lower half)
+        btn_w, btn_h = 360, 120
+        cx = screen_w // 2
+        cy = int(screen_h * 0.72)
+        self.start_button_rect = self.welcome_canvas.create_rectangle(
+            cx - btn_w // 2, cy - btn_h // 2, cx + btn_w // 2, cy + btn_h // 2,
+            fill="white",
             outline="white",
             width=2
         )
-        self.code_button_text = self.welcome_canvas.create_text(
-            screen_w - 250,
-            screen_h - 148,
-            text="I have a code",
-            fill="white",
-            font=("Helvetica", 18, "bold"),
+        self.start_button_text = self.welcome_canvas.create_text(
+            cx, cy,
+            text="START",
+            fill="black",
+            font=self.font_button,
             anchor="center"
         )
 
-        # Welcome/payment state
-        self.session_paid = False
-        self._payment_in_progress = False
+        # Welcome state
         self._welcome_tap_enabled = True
 
-        def _on_code_button_tap(event=None):
-            self.show_code_entry_screen()
-            return "break"
-
-        def _tap_wrapper(event=None):
-            bbox = self.welcome_canvas.bbox(self.code_button_rect)
-            if bbox and bbox[0] <= event.x <= bbox[2] and bbox[1] <= event.y <= bbox[3]:
-                return _on_code_button_tap(event)
-            return "break"
-
-        # Bind tap/click across the whole welcome screen
-        self.welcome_canvas.bind("<Button-1>", _tap_wrapper)
-        self.welcome_canvas.tag_bind(self.welcome_bg_item, "<Button-1>", _tap_wrapper)
-        self.welcome_canvas.tag_bind(self.welcome_text_item, "<Button-1>", _tap_wrapper)
-        self.welcome_canvas.tag_bind(self.subtitle_item, "<Button-1>", _tap_wrapper)
-        self.welcome_canvas.tag_bind(self.code_button_rect, "<Button-1>", _on_code_button_tap)
-        self.welcome_canvas.tag_bind(self.code_button_text, "<Button-1>", _on_code_button_tap)
-
-    def build_code_entry_screen(self):
-        self.code_frame = tk.Frame(self.container, bg="black")
-
-        self.code_bg_label = tk.Label(self.code_frame, bg="black", borderwidth=0)
-        self.code_bg_label.place(x=0, y=0, relwidth=1, relheight=1)
-        self._load_code_background()
-
-        self.code_panel = tk.Frame(
-            self.code_frame,
-            bg="black",
-            highlightthickness=2,
-            highlightbackground="white",
-            bd=0,
-        )
-        self.code_panel.place(
-            relx=0.28,
-            rely=0.5,
-            anchor="center",
-            width=660,
-            height=620,
-        )
-
-        self.code_close_button = tk.Button(
-            self.code_panel,
-            text="X",
-            command=self.show_welcome_screen,
-            font=("Helvetica", 20, "bold"),
-            bg="black",
-            fg="white",
-            activebackground="black",
-            activeforeground="white",
-            borderwidth=0,
-            highlightthickness=0,
-            cursor="hand2",
-        )
-        self.code_close_button.place(relx=1.0, x=-28, y=24, anchor="ne")
-
-        self.code_title_label = tk.Label(
-            self.code_panel,
-            text="Enter your code",
-            bg="black",
-            fg="white",
-            font=("Helvetica", 44, "bold"),
-        )
-        self.code_title_label.pack(pady=(36, 16))
-
-        self.code_error_var = tk.StringVar(value="")
-        self.code_entry_var = tk.StringVar()
-
-        self.code_entry = tk.Entry(
-            self.code_panel,
-            textvariable=self.code_entry_var,
-            font=("Helvetica", 26),
-            justify="center",
-            width=28,
-            relief="flat",
-            highlightthickness=3,
-            highlightbackground="white",
-            highlightcolor="white",
-            bd=0,
-        )
-        self.code_entry.pack(pady=(0, 14), ipadx=12, ipady=18)
-        self.code_entry.bind("<Return>", self._submit_access_code)
-        self.code_entry.bind("<Button-1>", self._focus_code_entry)
-        self.code_entry.bind("<FocusIn>", self._focus_code_entry)
-
-        self.code_enter_button = tk.Button(
-            self.code_panel,
-            text="Enter",
-            command=self._submit_access_code,
-            font=("Helvetica", 24, "bold"),
-            bg="white",
-            fg="black",
-            activebackground="#f0f0f0",
-            activeforeground="black",
-            relief="flat",
-            padx=28,
-            pady=14,
-            cursor="hand2",
-        )
-        self.code_enter_button.pack(pady=(0, 0))
-
-        self.code_error_label = tk.Label(
-            self.code_panel,
-            textvariable=self.code_error_var,
-            bg="black",
-            fg="#ff6b6b",
-            font=("Helvetica", 22, "bold"),
-        )
-        self.code_error_label.pack(pady=(0, 6))
-
-        self.code_keyboard_frame = tk.Frame(self.code_panel, bg="black")
-        self.code_keyboard_frame.pack(pady=(0, 0))
-        self.code_keyboard_visible = False
-        self._build_code_keyboard()
-        self.code_keyboard_frame.pack_forget()
-
-    def _load_code_background(self):
-        if not self.code_bg_path:
-            return
-
-        try:
-            img = Image.open(self.code_bg_path)
-            img = img.resize(
-                (self.root.winfo_screenwidth(), self.root.winfo_screenheight()),
-                Image.LANCZOS
-            )
-            self.tk_code_bg = ImageTk.PhotoImage(img)
-            self.code_bg_label.configure(image=self.tk_code_bg)
-        except Exception as e:
-            print(f"[WARN] Could not load code background: {e}")
-            self.tk_code_bg = None
-            self.code_bg_label.configure(image="", bg="black")
-
-    def _focus_code_entry(self, event=None):
-        try:
-            self.code_entry.focus_set()
-        except Exception:
-            pass
-        self._show_touch_keyboard()
-        return None
-
-    def _build_code_keyboard(self):
-        rows = [
-            list("QWERTYUIOP"),
-            list("ASDFGHJKL"),
-            list("ZXCVBNM"),
-        ]
-
-        for row_index, chars in enumerate(rows):
-            row_frame = tk.Frame(self.code_keyboard_frame, bg="black")
-            row_frame.pack(pady=4)
-            for ch in chars:
-                btn = tk.Button(
-                    row_frame,
-                    text=ch,
-                    command=lambda value=ch: self._code_keyboard_press(value),
-                    font=("Helvetica", 16, "bold"),
-                    width=3,
-                    bg="#1a1a1a",
-                    fg="white",
-                    activebackground="#2b2b2b",
-                    activeforeground="white",
-                    relief="flat",
-                    padx=4,
-                    pady=8,
-                    cursor="hand2",
-                )
-                btn.pack(side="left", padx=3)
-
-        action_row = tk.Frame(self.code_keyboard_frame, bg="black")
-        action_row.pack(pady=(10, 0))
-
-        buttons = [
-            ("Space", lambda: self._code_keyboard_press(" "), 10),
-            ("Back", self._code_keyboard_backspace, 6),
-            ("Clear", self._code_keyboard_clear, 6),
-            ("Enter", self._submit_access_code, 6),
-        ]
-
-        for label, cmd, width in buttons:
-            btn = tk.Button(
-                action_row,
-                text=label,
-                command=cmd,
-                font=("Helvetica", 15, "bold"),
-                width=width,
-                bg="white" if label == "Enter" else "#1a1a1a",
-                fg="black" if label == "Enter" else "white",
-                activebackground="#f0f0f0" if label == "Enter" else "#2b2b2b",
-                activeforeground="black" if label == "Enter" else "white",
-                relief="flat",
-                padx=6,
-                pady=10,
-                cursor="hand2",
-            )
-            btn.pack(side="left", padx=4)
-
-    def _show_touch_keyboard(self):
-        if not getattr(self, "code_keyboard_visible", False):
-            self.code_keyboard_frame.pack(pady=(0, 0))
-            self.code_keyboard_visible = True
-
-    def _hide_touch_keyboard(self):
-        if getattr(self, "code_keyboard_visible", False):
-            self.code_keyboard_frame.pack_forget()
-            self.code_keyboard_visible = False
-
-    def _code_keyboard_press(self, value: str):
-        current = self.code_entry_var.get()
-        self.code_entry_var.set(current + value)
-        self.code_entry.focus_set()
-        self.code_entry.icursor(tk.END)
-        self.code_entry.xview_moveto(1.0)
-
-    def _code_keyboard_backspace(self):
-        current = self.code_entry_var.get()
-        self.code_entry_var.set(current[:-1])
-        self.code_entry.focus_set()
-        self.code_entry.icursor(tk.END)
-        self.code_entry.xview_moveto(1.0)
-
-    def _code_keyboard_clear(self):
-        self.code_entry_var.set("")
-        self.code_entry.focus_set()
-        self.code_entry.icursor(0)
-        self.code_entry.xview_moveto(0.0)
-
-    def _load_used_one_time_access_codes(self) -> set[str]:
-        if not self.used_codes_path.is_file():
-            return set()
-        try:
-            data = json.loads(self.used_codes_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            print(f"[WARN] Could not read used access codes: {e}")
-            return set()
-
-        if not isinstance(data, list):
-            return set()
-        return {
-            str(code).strip().casefold()
-            for code in data
-            if str(code).strip()
-        }
-
-    def _save_used_one_time_access_codes(self):
-        try:
-            self.used_codes_path.write_text(
-                json.dumps(sorted(self.used_one_time_access_codes), indent=2),
-                encoding="utf-8",
-            )
-        except Exception as e:
-            print(f"[WARN] Could not save used access codes: {e}")
-
-    def _grant_code_access(self):
-        self._cancel_code_screen_timeout()
-        self.code_error_var.set("")
-        self.code_entry_var.set("")
-        self._hide_touch_keyboard()
-        self._code_screen_active = False
-        self.session_paid = True
-        self._payment_in_progress = False
-        self._welcome_tap_enabled = False
-        self.start_sequence()
-        return "break"
-
-    def _submit_access_code(self, event=None):
-        entered_code = (self.code_entry_var.get() or "").strip().casefold()
-        if entered_code in self.one_time_access_codes:
-            if entered_code in self.used_one_time_access_codes:
-                self.code_error_var.set("the code has already been used")
-                try:
-                    self.code_entry.selection_range(0, tk.END)
-                    self.code_entry.focus_set()
-                except Exception:
-                    pass
-                self._show_touch_keyboard()
+        def _on_start_tap(event=None):
+            if not getattr(self, "_welcome_tap_enabled", True):
                 return "break"
+            self._welcome_tap_enabled = False
+            self.start_sequence()
+            return "break"
 
-            self.used_one_time_access_codes.add(entered_code)
-            self._save_used_one_time_access_codes()
-            return self._grant_code_access()
-
-        if entered_code in self.approved_access_codes:
-            return self._grant_code_access()
-
-        self.code_error_var.set("error code not recognized")
-        try:
-            self.code_entry.selection_range(0, tk.END)
-            self.code_entry.focus_set()
-        except Exception:
-            pass
-        self._show_touch_keyboard()
-        return "break"
+        # Tapping START begins a free session
+        self.welcome_canvas.tag_bind(self.start_button_rect, "<Button-1>", _on_start_tap)
+        self.welcome_canvas.tag_bind(self.start_button_text, "<Button-1>", _on_start_tap)
 
     def build_capture_screen(self):
         self.capture_frame = tk.Frame(self.container, bg="black")
@@ -1583,45 +834,13 @@ class PhotoBoothUI:
         for child in self.container.winfo_children():
             child.pack_forget()
 
-    def _cancel_code_screen_timeout(self):
-        after_id = getattr(self, "_code_screen_timeout_id", None)
-        if after_id:
-            try:
-                self.root.after_cancel(after_id)
-            except Exception:
-                pass
-        self._code_screen_timeout_id = None
-
-    def show_code_entry_screen(self):
-        self._code_screen_active = True
-        self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=False)
-        self.clear_screens()
-        self._load_code_background()
-        self.code_frame.pack(expand=True, fill="both")
-        self.code_entry_var.set("")
-        self.code_error_var.set("")
-        self.root.after(100, self._focus_code_entry)
-        self._cancel_code_screen_timeout()
-        self._code_screen_timeout_id = self.root.after(5 * 60 * 1000, self.show_welcome_screen)
-
     def show_welcome_screen(self):
-        self._cancel_code_screen_timeout()
-        self._code_screen_active = False
-        self._stop_reader_waiting(
-            cancel_reader=True,
-            clear_payment_intent=not (self.session_paid or self.is_running_sequence),
-        )
-        self._hide_touch_keyboard()
         self.clear_screens()
         self.welcome_frame.pack(expand=True, fill="both")
 
         # Reset session/run state
         self.is_running_sequence = False
-        self.session_paid = False
-        self._payment_in_progress = False
         self.filter_choice = "color"
-        self.code_entry_var.set("")
-        self.code_error_var.set("")
 
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
@@ -1630,6 +849,8 @@ class PhotoBoothUI:
             self._welcome_tap_enabled = False
             self.stop_welcome_pulse()
             try:
+                self.welcome_canvas.itemconfig(self.start_button_rect, state="hidden")
+                self.welcome_canvas.itemconfig(self.start_button_text, state="hidden")
                 self.welcome_canvas.coords(
                     self.welcome_text_item, sw // 2, int(sh * 0.40)
                 )
@@ -1645,7 +866,7 @@ class PhotoBoothUI:
                 self.welcome_canvas.itemconfig(
                     self.subtitle_item,
                     text=(
-                        "This booth cannot take payments right now.\n"
+                        "This booth is temporarily unavailable.\n"
                         "Staff: load a new roll, then press Ctrl+Shift+P."
                     ),
                     fill="white",
@@ -1658,6 +879,8 @@ class PhotoBoothUI:
 
         self._welcome_tap_enabled = True
         try:
+            self.welcome_canvas.itemconfig(self.start_button_rect, state="normal")
+            self.welcome_canvas.itemconfig(self.start_button_text, state="normal")
             self.welcome_canvas.coords(self.welcome_text_item, sw // 2, 200)
             self.welcome_canvas.coords(self.subtitle_item, sw // 2, 500)
             self.welcome_canvas.itemconfig(
@@ -1668,7 +891,7 @@ class PhotoBoothUI:
             )
             self.welcome_canvas.itemconfig(
                 self.subtitle_item,
-                text=self._default_welcome_subtitle(),
+                text="Tap START to begin",
                 fill="white",
                 font=self.font_subtitle,
                 width=0,
@@ -1681,7 +904,6 @@ class PhotoBoothUI:
             self.start_welcome_pulse()
         except Exception:
             pass
-        self.root.after(100, self._start_reader_waiting)
 
     def _get_font_with_size(self, base_font, size: int):
         """
@@ -1796,17 +1018,11 @@ class PhotoBoothUI:
 
     def start_sequence(self):
         """
-        Entry point after successful payment.
-        Must only run once per paid session.
+        Entry point when the guest taps START.
+        Free experience: no payment required. Runs once per session.
         """
-        self._code_screen_active = False
-        self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=False)
-
         if self.telemetry.is_out_of_paper():
             self.show_welcome_screen()
-            return
-
-        if not getattr(self, "session_paid", False):
             return
 
         if getattr(self, "is_running_sequence", False):
@@ -1830,7 +1046,6 @@ class PhotoBoothUI:
         except Exception as e:
             print("[ERROR] start_sequence failed:", e)
             self.is_running_sequence = False
-            self.session_paid = False
             self.show_welcome_screen()
 
     def start_next_photo(self):
@@ -1943,7 +1158,6 @@ class PhotoBoothUI:
                         f"Could not capture photo {self.photo_index}.\n\n{e}"
                     )
                     self.is_running_sequence = False
-                    self.session_paid = False
                     self.show_welcome_screen()
 
                 self.root.after(0, _handle_error)
@@ -2421,7 +1635,6 @@ class PhotoBoothUI:
         if getattr(self, "_is_shutting_down", False):
             return
         self._is_shutting_down = True
-        self._stop_reader_waiting(cancel_reader=True, clear_payment_intent=True)
 
         print("Shutting down booth...")
 
@@ -2503,11 +1716,8 @@ class PhotoBoothUI:
         # Reset session state
         self.captured_files = []
         self.last_composed_strip = None
-        self._payment_in_progress = False
-        self.session_paid = False
         self.is_running_sequence = False
         self.photo_index = 1
-        self._clear_reader_payment_intent()
 
         print(f"[CLEANUP] done. deleted {deleted} files.")
 
