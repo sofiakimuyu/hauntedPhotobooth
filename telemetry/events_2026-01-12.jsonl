@@ -1,8 +1,0 @@
-{"ts": "2026-01-12T21:03:17", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
-{"ts": "2026-01-12T21:03:17", "booth_id": "Stanford booth", "type": "print_failed", "data": {"details": "test fail"}}
-{"ts": "2026-01-12T21:03:17", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "test success"}}
-{"ts": "2026-01-12T21:03:18", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 10}}
-{"ts": "2026-01-12T21:04:55", "booth_id": "Stanford booth", "type": "session_started", "data": {}}
-{"ts": "2026-01-12T21:05:49", "booth_id": "Stanford booth", "type": "template_chosen", "data": {"template_id": "Template 4"}}
-{"ts": "2026-01-12T21:05:54", "booth_id": "Stanford booth", "type": "print_success", "data": {"details": "request id is HP_LaserJet_MFP_M130fw__5FB0F4_-64 (1 file(s))"}}
-{"ts": "2026-01-12T21:08:11", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}

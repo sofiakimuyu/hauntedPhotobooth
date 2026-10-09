@@ -1,5 +1,0 @@
-{"ts": "2026-05-09T00:27:19", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
-{"ts": "2026-05-09T00:27:19", "booth_id": "Stanford booth", "type": "crash", "data": {"exc_type": "KeyError", "message": "'STRIPE_SECRET_KEY'", "trace": "Traceback (most recent call last):\n  File \"/Users/sofiakimuyu/PycharmProjects/photobooth/EOS60D.py\", line 96, in <module>\n    stripe.api_key = os.environ[\"STRIPE_SECRET_KEY\"]\n                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen os>\", line 685, in __getitem__\nKeyError: 'STRIPE_SECRET_KEY'\n"}}
-{"ts": "2026-05-09T00:30:53", "booth_id": "Stanford booth", "type": "booth_started", "data": {}}
-{"ts": "2026-05-09T00:30:53", "booth_id": "Stanford booth", "type": "heartbeat", "data": {"note": "", "roll_prints": 39}}
-{"ts": "2026-05-09T00:42:43", "booth_id": "Stanford booth", "type": "booth_stopped", "data": {}}

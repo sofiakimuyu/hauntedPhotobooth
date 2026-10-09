@@ -1,0 +1,28 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Telemetry runtime data (event logs + stats)
+telemetry/
+
+# Databases
+*.db
+
+# Secrets (keep the .example.json committed)
+telegram_secrets.json
+*secrets.json
+!*.example.json
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Virtual environments
+.venv/
+venv/
+env/
